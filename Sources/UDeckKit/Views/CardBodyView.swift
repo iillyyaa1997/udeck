@@ -229,6 +229,15 @@ struct CardBodyView: View {
             ChipsRowView(items: items, theme: theme, send: send)
         case .feed(let entries):
             FeedRowView(entries: entries, theme: theme)
+                // A web page's link opens in the browser; any other — a file
+                // the plugin linked — is the plugin's to open (0.9.27).
+                .environment(\.openURL, OpenURLAction { url in
+                    if let scheme = url.scheme?.lowercased(), ["http", "https", "mailto"].contains(scheme) {
+                        return .systemAction
+                    }
+                    send(.link(url: url.absoluteString, keys: FeedLinks.keys(NSEvent.modifierFlags)))
+                    return .handled
+                })
         case .ask(let ask):
             AskRowView(ask: ask, theme: theme, send: send)
         case .input(let input):
@@ -385,4 +394,16 @@ final class CardRoom {
 extension EnvironmentValues {
     /// The card's measures, for a field's suggestions; nil outside a card.
     @Entry var cardRoom: CardRoom? = nil
+}
+
+/// The modifiers held as a feed's link is clicked, by name.
+enum FeedLinks {
+    static func keys(_ flags: NSEvent.ModifierFlags) -> [String] {
+        var keys: [String] = []
+        if flags.contains(.command) { keys.append("command") }
+        if flags.contains(.option) { keys.append("option") }
+        if flags.contains(.shift) { keys.append("shift") }
+        if flags.contains(.control) { keys.append("control") }
+        return keys
+    }
 }

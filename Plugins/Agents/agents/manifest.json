@@ -73,6 +73,35 @@
       "default": true,
       "label": "Make up names for chats",
       "help": "After the first answer the session's own agent names a chat with no name of its own: Haiku for Claude, Codex's model for Codex. A little of the subscription's limit. /rename in the field names one yourself."
+    },
+    {
+      "key": "editor",
+      "type": "enum",
+      "default": "system",
+      "label": "Open a file from the chat in",
+      "help": "A path in an answer opens here at its line. ⌘-click shows it in Finder, ⌥-click in Quick Look.",
+      "options": [
+        {
+          "value": "system",
+          "label": "The Mac's choice for the file"
+        },
+        {
+          "value": "vscode",
+          "label": "Visual Studio Code"
+        },
+        {
+          "value": "xcode",
+          "label": "Xcode"
+        },
+        {
+          "value": "cursor",
+          "label": "Cursor"
+        },
+        {
+          "value": "zed",
+          "label": "Zed"
+        }
+      ]
     }
   ]
 }

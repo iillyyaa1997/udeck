@@ -186,6 +186,10 @@ public enum ResidentEvent: Equatable, Sendable {
     /// typed (0.9.25): the row, the tab and the query. The plugin answers with
     /// its card, the items in the input's `suggest.found`.
     case suggest(row: String, tab: String, query: String)
+    /// A link in a feed was clicked that is not a web page's (0.9.27) — a
+    /// `file:` link the plugin wrote: the plugin opens it. `keys` are the
+    /// modifiers held: `command`, `option`, `shift`, `control`.
+    case link(url: String, keys: [String])
     /// A place of its own was closed. With `to`, the person asked for what it
     /// showed back on the board: show it in the place `to`.
     case closed(to: String?)
@@ -225,6 +229,7 @@ public enum ResidentEvent: Equatable, Sendable {
         var keep: String?
         var to: String?
         var files: [String]?
+        var keys: [String]?
     }
 
     /// The event as one line for the plugin's stdin.
@@ -249,6 +254,9 @@ public enum ResidentEvent: Equatable, Sendable {
         case .choose(let row, let menu, let option): wire = Wire(event: "choose", row: row, menu: menu, option: option)
         case .closed(let to): wire = Wire(event: "closed", to: to)
         case .suggest(let row, let tab, let query): wire = Wire(event: "suggest", id: tab, row: row, text: query)
+        case .link(let url, let keys):
+            wire = Wire(event: "link", text: url)
+            if !keys.isEmpty { wire.keys = keys }
         }
         if let place {
             wire.view = place.view

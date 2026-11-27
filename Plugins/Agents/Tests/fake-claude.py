@@ -363,6 +363,25 @@ def turn(text, pictures=0):
          "session_id": SESSION, "total_cost_usd": 0.0012})
 
 
+RICH = """## What came out today
+| What | Status | When |
+|---|---|---|
+| Live line | out in 0.9.24 | 13:20 |
+| Suggestions | out in 0.9.25 | 13:55 |
+| Smooth panel | building 0.9.26 | 14:40 |
+
+The notes are in notes.md:1 — and `notes.md` again.
+
+> A quote: the feed draws it with a bar.
+
+```swift
+let greeting = "hello" // a comment
+```
+---
+- a point
+  - a nested point"""
+
+
 def play(text, pictures):
     """One message's part of a turn; what it returns are the messages taken after its step."""
     russian = any("а" <= ch.lower() <= "я" for ch in text)
@@ -372,6 +391,10 @@ def play(text, pictures):
     taken = []
     if pictures:
         say(("Вижу картинок: %d." if russian else "I see %d picture(s).") % pictures)
+    if "[rich]" in text:
+        # An answer with what a feed draws besides text (uDeck 0.9.27): a table, code, a quote, a rule, a path.
+        say(RICH)
+        return take_waiting()
     if "question" in text.lower() or "вопрос" in text.lower():
         tool_id = "toolu_q%d" % n
         questions = [{"question": "Which colour should the badge be?", "header": "Colour", "multiSelect": False,

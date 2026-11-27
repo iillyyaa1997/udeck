@@ -220,36 +220,194 @@ struct MarkdownBlocks: View {
 
     var body: some View {
         let blocks = MarkdownBlock.blocks(text)
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 let caret = streaming && index == blocks.count - 1 ? AttributedString(" ▍") : AttributedString()
                 switch block {
                 case .paragraph(let value):
                     Text(Self.inline(value) + caret).font(theme.bodyFont)
-                case .bullet(let value):
+                case .bullet(let value, let level):
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("•").font(theme.bodyFont).foregroundStyle(theme.muted)
+                        Text(level == 0 ? "•" : "◦").font(theme.bodyFont).foregroundStyle(theme.muted)
                         Text(Self.inline(value) + caret).font(theme.bodyFont)
                     }
-                case .numbered(let marker, let value):
+                    .padding(.leading, CGFloat(level) * 14)
+                case .numbered(let marker, let value, let level):
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(marker).font(theme.bodyFont).foregroundStyle(theme.muted).monospacedDigit()
                         Text(Self.inline(value) + caret).font(theme.bodyFont)
                     }
-                case .heading(let value):
-                    Text(Self.inline(value) + caret).font(theme.bodyFont.weight(.semibold))
-                case .code(let value):
-                    Text(AttributedString(value) + caret)
-                        .font(theme.monoFont)
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(theme.recess))
+                    .padding(.leading, CGFloat(level) * 14)
+                case .heading(let value, let level):
+                    Text(Self.inline(value) + caret)
+                        .font(.system(size: theme.textSize + (level == 1 ? 3 : level == 2 ? 1.5 : 0), weight: .semibold))
+                        .padding(.top, 2)
+                case .code(let value, let language):
+                    CodeBlock(code: value, language: language, caret: caret, theme: theme)
+                case .table(let header, let rows):
+                    FeedTable(header: header, rows: rows, theme: theme)
+                case .quote(let value):
+                    HStack(alignment: .top, spacing: 8) {
+                        RoundedRectangle(cornerRadius: 1.5).fill(theme.muted.opacity(0.5)).frame(width: 3)
+                        Text(Self.inline(value) + caret).font(theme.bodyFont).foregroundStyle(theme.muted)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                case .rule:
+                    Rectangle().fill(theme.line).frame(height: 1).padding(.vertical, 3)
                 }
             }
             if blocks.isEmpty && streaming { Text("▍").font(theme.bodyFont) }
         }
         .foregroundStyle(theme.text)
         .textSelection(.enabled)
+    }
+}
+
+/// Fenced code: its language and a Copy button over it, the code in a
+/// monospaced font with strings and comments told apart.
+struct CodeBlock: View {
+    let code: String
+    let language: String
+    let caret: AttributedString
+    let theme: DeckTheme
+    @State private var copied = false
+    @Environment(\.strings) private var strings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(language.isEmpty ? " " : language).foregroundStyle(theme.muted)
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(code, forType: .string)
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+                } label: {
+                    Text(copied ? strings(.feedCopied) : strings(.feedCopy)).foregroundStyle(theme.muted)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("feed.code.copy")
+            }
+            .font(.system(size: max(9, theme.textSize - 3)))
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            Rectangle().fill(theme.line).frame(height: 1)
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(CodeColors.colored(code, theme: theme) + caret)
+                    .font(theme.monoFont)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(8)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(theme.recess))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(theme.line, lineWidth: 1))
+    }
+}
+
+/// Strings and comments in code a shade apart — enough to read it by, with
+/// no grammar of any one language.
+enum CodeColors {
+    static func colored(_ code: String, theme: DeckTheme) -> AttributedString {
+        var out = AttributedString()
+        var current = ""
+        var quote: Character?
+        var comment = false
+        func push(_ text: String, _ color: Color?) {
+            guard !text.isEmpty else { return }
+            var piece = AttributedString(text)
+            if let color { piece.foregroundColor = color }
+            out += piece
+        }
+        var characters = Array(code)
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            if comment {
+                current.append(character)
+                if character == "\n" { push(current, theme.muted); current = ""; comment = false }
+            } else if let open = quote {
+                current.append(character)
+                if character == open, index == 0 || characters[index - 1] != "\\" { push(current, theme.ok); current = ""; quote = nil }
+                if character == "\n" { push(current, theme.ok); current = ""; quote = nil }
+            } else if character == "\"" || character == "'" || character == "`" {
+                push(current, nil); current = String(character); quote = character
+            } else if character == "#" || (character == "/" && index + 1 < characters.count && characters[index + 1] == "/") {
+                push(current, nil); current = String(character); comment = true
+            } else {
+                current.append(character)
+            }
+            index += 1
+        }
+        push(current, comment ? theme.muted : quote != nil ? theme.ok : nil)
+        characters.removeAll()
+        return out
+    }
+}
+
+/// A table as the feed draws it (the operator's «1», 11-27): a clean table
+/// where it fits — hairlines, the first column bold — and where it does not,
+/// a list on a plate, as the Mac's Settings: the first column as the title,
+/// the others in a grey line under it.
+struct FeedTable: View {
+    let header: [String]
+    let rows: [[String]]
+    let theme: DeckTheme
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            table.fixedSize(horizontal: true, vertical: false)
+            list
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("feed.table")
+    }
+
+    private func cell(_ text: String) -> Text { Text(MarkdownBlocks.inline(text)) }
+
+    private var table: some View {
+        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 0) {
+            GridRow {
+                ForEach(Array(header.enumerated()), id: \.offset) { _, title in
+                    cell(title).font(.system(size: max(9, theme.textSize - 2.5))).foregroundStyle(theme.muted)
+                        .padding(.bottom, 5)
+                }
+            }
+            Rectangle().fill(theme.line).frame(height: 1).gridCellUnsizedAxes(.horizontal)
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                GridRow {
+                    ForEach(Array(row.enumerated()), id: \.offset) { column, value in
+                        cell(value).font(column == 0 ? theme.bodyFont.weight(.semibold) : theme.bodyFont)
+                            .monospacedDigit()
+                            .padding(.vertical, 6)
+                    }
+                }
+                if index < rows.count - 1 {
+                    Rectangle().fill(theme.line.opacity(0.7)).frame(height: 1).gridCellUnsizedAxes(.horizontal)
+                }
+            }
+        }
+        .accessibilityIdentifier("feed.table.grid")
+    }
+
+    private var list: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                VStack(alignment: .leading, spacing: 1) {
+                    cell(row.first ?? "").font(theme.bodyFont.weight(.semibold))
+                    let rest = row.dropFirst().filter { !$0.isEmpty }
+                    if !rest.isEmpty {
+                        cell(rest.joined(separator: " · ")).font(theme.smallFont).foregroundStyle(theme.muted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                if index < rows.count - 1 { Rectangle().fill(theme.line).frame(height: 1).padding(.leading, 10) }
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 10).fill(theme.recess))
+        .accessibilityIdentifier("feed.table.list")
     }
 }
 

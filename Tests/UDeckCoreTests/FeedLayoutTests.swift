@@ -52,9 +52,43 @@ struct FeedLayoutTests {
             .bullet("процесс умер"),
             .numbered("1.", "первое"),
             .numbered("12.", "двенадцатое"),
-            .heading("Итог"),
-            .code("let x = 1"),
+            .heading("Итог", level: 2),
+            .code("let x = 1", language: "swift"),
         ])
+    }
+
+    @Test("tables, quotes, rules, nested lists and heading levels — drawn as their raw text before 0.9.27")
+    func more() {
+        let text = """
+        | Что | Статус |
+        |---|:---:|
+        | **Строка** над полем | вышла в 0.9.24 |
+        | Подсказки | вышли \\| 0.9.25 | лишняя |
+        | Коротко |
+        текст после
+        > цитата
+        > вторая строка
+        ---
+        - пункт
+          - вложенный
+            1. ещё глубже
+        ### Мелкий
+        * * *
+        """
+        #expect(MarkdownBlock.blocks(text) == [
+            .table(header: ["Что", "Статус"], rows: [["**Строка** над полем", "вышла в 0.9.24"],
+                                                    ["Подсказки", "вышли | 0.9.25"], ["Коротко", ""]]),
+            .paragraph("текст после"),
+            .quote("цитата\nвторая строка"),
+            .rule,
+            .bullet("пункт"),
+            .bullet("вложенный", level: 1),
+            .numbered("1.", "ещё глубже", level: 2),
+            .heading("Мелкий", level: 3),
+            .rule,
+        ])
+        #expect(MarkdownBlock.blocks("| a | b |\nне таблица") == [.paragraph("| a | b |\nне таблица")], "no rule under it, no table")
+        #expect(MarkdownBlock.blocks("-- два") == [.paragraph("-- два")])
     }
 
     @Test("a fence still open while an answer streams is code so far; 3.5 is no list")

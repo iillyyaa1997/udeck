@@ -175,6 +175,9 @@ public final class AgentsApp {
             press(event["id"]?.string ?? "")
         case "suggest":
             suggested(tab: event["id"]?.string ?? "", query: event["text"]?.string ?? "")
+        case "link":
+            FileOpener.open(event["text"]?.string ?? "", keys: Set((event["keys"]?.array ?? []).compactMap(\.string)),
+                            editor: Self.setting(ProcessInfo.processInfo.environment["UDECK_SETTING_EDITOR"]) ?? "system")
         case "submit":
             let text = event["text"]?.string ?? ""
             let files = (event["files"]?.array ?? []).compactMap(\.string)

@@ -748,6 +748,8 @@ struct Russian: Vocabulary {
             }
         case .feedActionRunning: "работает"
         case .feedActionFailed: "ошибка"
+        case .feedCopy: "копировать"
+        case .feedCopied: "скопировано"
         case .inputSend: "Отправить"
         case .inputStop: "Остановить"
         case .inputAttach: "Прикрепить файлы"

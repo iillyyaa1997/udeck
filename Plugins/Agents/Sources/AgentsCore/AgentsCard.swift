@@ -170,7 +170,8 @@ enum AgentsCard {
         // only, and no entry longer than a screenful.
         let keep = app.size.rows <= 4 ? 30 : 60
         rows.append(["feed": .array(session.feed.suffix(keep).map {
-            feedEntry($0.item, app, label: $0.label, files: $0.item.uuid.flatMap { session.files(of: $0) })
+            feedEntry($0.item, app, label: $0.label, files: $0.item.uuid.flatMap { session.files(of: $0) },
+                      folder: session.folder)
         })])
         let held = app.heldBack[session.id] != nil
         if held { rows.append(["ask": heldRow(session, app)]) }
@@ -663,7 +664,8 @@ enum AgentsCard {
         text.count <= limit ? text : String(text.prefix(limit)) + "…"
     }
 
-    static func feedEntry(_ item: FeedItem, _ app: AgentsApp, label: String? = nil, files: [String]? = nil) -> JSONValue {
+    static func feedEntry(_ item: FeedItem, _ app: AgentsApp, label: String? = nil, files: [String]? = nil,
+                          folder: URL? = nil) -> JSONValue {
         switch item {
         case .user(let id, let text):
             var entry: [String: JSONValue] = ["id": .string(id.uuidString), "role": "user", "text": .string(clipped(text))]
@@ -678,7 +680,9 @@ enum AgentsCard {
             }
             return .object(entry)
         case .assistant(let id, let text, let streaming):
-            var entry: [String: JSONValue] = ["id": .string(id.uuidString), "role": "assistant", "text": .string(clipped(text)),
+            // A finished answer's paths to files are links (uDeck 0.9.27).
+            let shown = !streaming && folder != nil ? PathLinks.link(clipped(text), folder: folder!) : clipped(text)
+            var entry: [String: JSONValue] = ["id": .string(id.uuidString), "role": "assistant", "text": .string(shown),
                                               "streaming": .bool(streaming)]
             if let label { entry["label"] = .string(label) }
             return .object(entry)

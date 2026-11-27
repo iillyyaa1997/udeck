@@ -846,6 +846,9 @@ public enum Phrase: Sendable, Equatable {
     case feedActions(count: Int)
     case feedActionRunning
     case feedActionFailed
+    /// A code block's Copy, and what it says once it has copied.
+    case feedCopy
+    case feedCopied
     /// The panel field's buttons, for their help and VoiceOver.
     case inputSend
     case inputStop

@@ -727,6 +727,8 @@ struct English: Vocabulary {
         case .feedActions(let count): count == 1 ? "1 action" : "\(count) actions"
         case .feedActionRunning: "running"
         case .feedActionFailed: "failed"
+        case .feedCopy: "copy"
+        case .feedCopied: "copied"
         case .inputSend: "Send"
         case .inputStop: "Stop"
         case .inputAttach: "Attach files"
