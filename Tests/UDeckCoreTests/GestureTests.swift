@@ -196,6 +196,37 @@ struct GestureTests {
         #expect(!driver.fired)
     }
 
+    /// The operator, 11-27: «навёл, жду Н секунд, и потом только он
+    /// выплывает» — the strip is six points of a notch about thirty tall.
+    @Test("a cursor resting on the notch, below the strip, opens the panel by the dwell")
+    func restingOnTheNotch() throws {
+        let screen = ScreenFixtures.builtInNotched
+        let notch = try #require(screen.notchRect)
+        var driver = Driver(screen: screen, startingAt: CGPoint(x: notch.midX, y: notch.minY - 250))
+        for _ in 0 ..< 25 { driver.move(dx: 0, dy: 10, over: 0.008) }
+        #expect(driver.cursor.y < screen.frame.maxY - driver.tuning.stripHeight, "below the strip")
+        #expect(notch.contains(driver.cursor), "on the notch")
+        driver.rest(for: driver.tuning.dwellDuration * 1.5)
+        #expect(driver.fired)
+    }
+
+    @Test("beside the notch, and on a screen without one, the same height below the edge stays quiet")
+    func onlyTheNotchIsTall() throws {
+        let screen = ScreenFixtures.builtInNotched
+        let notch = try #require(screen.notchRect)
+        // Within the strip's side margin, as low as the notch goes.
+        var beside = Driver(screen: screen, startingAt: CGPoint(x: notch.minX - 10, y: notch.minY - 250))
+        for _ in 0 ..< 25 { beside.move(dx: 0, dy: 10, over: 0.008) }
+        beside.rest(for: beside.tuning.lateralApproachDwellDuration * 2)
+        #expect(!beside.fired, "the menu bar beside the notch is not the notch")
+
+        let flat = ScreenFixtures.externalMain
+        var external = Driver(screen: flat, startingAt: CGPoint(x: flat.frame.midX, y: flat.frame.maxY - 270))
+        for _ in 0 ..< 25 { external.move(dx: 0, dy: 10, over: 0.008) }
+        external.rest(for: external.tuning.lateralApproachDwellDuration * 2)
+        #expect(!external.fired, "without a notch the strip is the strip")
+    }
+
     @Test("crossing in from the side needs a visibly longer pause")
     func lateralApproachNeedsLongerDwell() {
         var driver = Driver(startingAt: CGPoint(x: 1000, y: 1439))

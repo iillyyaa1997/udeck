@@ -55,6 +55,21 @@ public struct PanelGeometry: Equatable, Sendable {
         )
     }
 
+    /// Whether the cursor is where the gesture listens: the strip, and on a
+    /// screen with a notch the whole notch as well.
+    ///
+    /// The strip alone is six points of a notch about thirty tall, so a cursor
+    /// resting on the notch — where anyone aiming at it rests it — did nothing
+    /// until it was pushed to the very edge: the operator's «навёл, жду Н
+    /// секунд, и потом только он выплывает» (11-27), every reveal in his log
+    /// fired by the push. Nothing lives under a notch, so the rest of it adds
+    /// no menu to cover; the strip's margins beside it stay six points tall.
+    public func isInTriggerZone(_ point: CGPoint) -> Bool {
+        if containsPointer(point, in: triggerStrip) { return true }
+        guard let notch = screen.notchRect else { return false }
+        return containsPointer(point, in: notch)
+    }
+
     /// True when the cursor is close enough to the top edge to count as pinned
     /// against it. The cursor can reach `frame.maxY` exactly, so this has to be
     /// a range rather than an equality.
