@@ -213,13 +213,32 @@ struct MarkdownBlocks: View {
     let streaming: Bool
     let theme: DeckTheme
 
-    static func inline(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+    /// Parsed once, not on every drawing: a feed is drawn again for each new
+    /// card, and the panel lays it out again as it opens (the operator, 11-27,
+    /// «юдек тормозит»). Bounded; a streaming answer's text changes, so its
+    /// parses come and go.
+    @MainActor private static var inlineMade: [String: AttributedString] = [:]
+    @MainActor private static var blocksMade: [String: [MarkdownBlock]] = [:]
+
+    @MainActor static func inline(_ text: String) -> AttributedString {
+        if let made = inlineMade[text] { return made }
+        let parsed = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
             ?? AttributedString(text)
+        if inlineMade.count > 2_000 { inlineMade.removeAll() }
+        inlineMade[text] = parsed
+        return parsed
+    }
+
+    @MainActor static func blocks(_ text: String) -> [MarkdownBlock] {
+        if let made = blocksMade[text] { return made }
+        let parsed = MarkdownBlock.blocks(text)
+        if blocksMade.count > 600 { blocksMade.removeAll() }
+        blocksMade[text] = parsed
+        return parsed
     }
 
     var body: some View {
-        let blocks = MarkdownBlock.blocks(text)
+        let blocks = Self.blocks(text)
         VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 let caret = streaming && index == blocks.count - 1 ? AttributedString(" ▍") : AttributedString()

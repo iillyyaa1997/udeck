@@ -120,6 +120,11 @@ public final class PanelController {
     /// Keeps the dwell alive while the cursor is not moving.
     private var armingTimer: Timer?
 
+    /// When the gesture last fired, until the panel came to rest.
+    private var revealStarted: TimeInterval?
+    /// How long the main thread was held between two ticks, while revealing.
+    private let mainThreadStalls = StallMeter()
+
     /// The slow look at where the cursor actually is; see
     /// `GestureTuning.pointerPollInterval`.
     private var pointerPollTimer: Timer?
@@ -547,6 +552,9 @@ public final class PanelController {
             DeckLog.gesture.notice("fired by \(path.rawValue, privacy: .public) on \(screenUnderCursor?.name ?? "no screen", privacy: .public)")
             armingTimer?.invalidate()
             if let screenUnderCursor { attachedScreenID = screenUnderCursor.id }
+            revealStarted = ProcessInfo.processInfo.systemUptime
+            mainThreadStalls.reset()
+            mainThreadStalls.start()
             apply(.revealRequested)
         case .arming:
             // A dwell is a measurement of time, but the recognizer only ever
@@ -578,6 +586,14 @@ public final class PanelController {
     /// panel draws on and everything outside belongs to whatever is behind it
     /// without uDeck having to decide anything.
     private func settleWindow() {
+        // How long a reveal took, the gesture to the panel at rest, kept in the
+        // log: the operator, 11-27, «шторка выпадает долго … юдек тормозит».
+        if let started = revealStarted {
+            revealStarted = nil
+            let took = Int(((ProcessInfo.processInfo.systemUptime - started) * 1000).rounded())
+            DeckLog.panel.notice("revealed in \(took) ms to rest, \(self.mainThreadStalls.summary(), privacy: .public)")
+            mainThreadStalls.reset()
+        }
         guard let geometry else { return }
         // Arriving is what the views are waiting to be told: two of their rules
         // — nothing is drawn under a real notch, and the island's mark is not
@@ -1457,4 +1473,44 @@ public final class PanelController {
 private struct MainThreadKeyEvent: @unchecked Sendable {
     let event: NSEvent
     init(_ event: NSEvent) { self.event = event }
+}
+
+/// The main thread's stalls while the panel opens: the longest gap between
+/// two ticks of a 10 ms timer on the main run loop, and how many went past
+/// 50 ms — a frame lost three times over. Measured from the gesture to rest.
+@MainActor
+final class StallMeter {
+    private var timer: Timer?
+    private var last: TimeInterval = 0
+    private var longest: TimeInterval = 0
+    private var over50 = 0
+
+    func start() {
+        guard timer == nil else { return }
+        last = ProcessInfo.processInfo.systemUptime
+        let timer = Timer(timeInterval: 0.01, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private func tick() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let gap = now - last
+        last = now
+        longest = max(longest, gap)
+        if gap > 0.05 { over50 += 1 }
+    }
+
+    func summary() -> String {
+        "main thread: longest stall \(Int((longest * 1000).rounded())) ms, \(over50) over 50 ms"
+    }
+
+    func reset() {
+        timer?.invalidate()
+        timer = nil
+        longest = 0
+        over50 = 0
+    }
 }
