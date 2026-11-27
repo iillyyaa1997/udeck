@@ -52,6 +52,7 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
 import json
 import re
 import shlex
@@ -8056,3 +8057,123 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+_SHIFT_RETURN = """
+tell application "System Events" to tell process %(process)s
+  set frontmost to true
+  key code 36 using shift down
+end tell
+"""
+
+
+def _extent(machine, step):
+    """The panel window's frame, and the card's: its top control and its field's bottom."""
+    walked = ui.walk(machine, step, ui.PANEL)
+    window = next((w for w in walked if w.role == "AXWindow" and w.frame), None)
+    header = next((w for w in walked if w.identifier == "row.button.new" and w.frame), None)
+    field = next((w for w in walked if w.identifier == "row.input.message" and w.frame), None)
+    print(step, "window:", window and window.frame, "header:", header and header.frame, "field:", field and field.frame,
+          "field shown:", field and field.shown)
+    return walked, window, header, field
+
+
+def _fits(window, header, field, step):
+    assert window and header and field, f"{step}: not all found"
+    wx, wy, ww, wh = window.frame
+    assert header.frame[1] >= wy - 1, f"{step}: the card's top above the panel {header.frame} {window.frame}"
+    assert field.frame[1] + field.frame[3] <= wy + wh + 1, f"{step}: the field below the panel {field.frame} {window.frame}"
+    assert header.shown and field.shown, f"{step}: scrolled out of view"
+
+
+def check_agents_fit(machine, check_dir, lab):
+    """The 11-26 card: 8 rows, cozy, text 13.5 — it fits the panel; a long message scrolls in the field;
+    typing after a click on an answer goes into the field; ⌘V of a Finder file attaches it."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin and the stand-in CLI")
+    _write(machine, SETTINGS, {"language": "ru", "density": "cozy", "textSize": 13.5}, "uDeck in Russian, cozy, text 13.5")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake, "name_chats": False}}},
+           "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 12, "height": 8}]}]},
+           "Agents on 12 x 8, as on the operator's Mac")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=40)
+    machine.click(*new.middle, "＋")
+    machine.sleep(1)
+    option = ui.wait_for(machine, "row.button.new.new:claude", "a new Claude session", ui.PANEL, seconds=8)
+    machine.click(*option.middle, "a new Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "the folder")
+    machine.sleep(3)
+    field = ui.wait_for(machine, "row.input.message", "the field", ui.PANEL, seconds=30)
+    _, window, header, found = _extent(machine, "fit 1 the card on 8 rows")
+    machine.screenshot(check_dir, "fit 1 the card on 8 rows")
+    _fits(window, header, found, "fit 1")
+
+    machine.click(*field.middle, "the field")
+    for n in range(1, 15):
+        ui.type_text(machine, f"line {n} of a long message", f"typing line {n}")
+        if n < 14:
+            ui.ask(machine, ui._applescript(_SHIFT_RETURN, process=ui.PROCESS), "Shift-Return")
+    machine.sleep(1)
+    _, window, header, found = _extent(machine, "fit 2 a long message")
+    machine.screenshot(check_dir, "fit 2 a long message scrolls in the field")
+    _fits(window, header, found, "fit 2")
+    # The text view's own frame is all 14 lines; what shows is its scroll area, under which Send sits.
+    send = next((w for w in ui.walk(machine, "Send", ui.PANEL) if w.identifier == "row.input.message.send" and w.frame), None)
+    print("send:", send and (send.frame, send.shown))
+    assert send and send.shown and send.frame[1] + send.frame[3] <= window.frame[1] + window.frame[3] + 1, f"Send out of view: {send}"
+    assert "line 14" in (found.value or ""), f"the field holds: {found.value!r}"
+    ui.press_return(machine, "sending it")
+
+    allow = ui.wait_for(machine, "row.ask.allow:perm-b1", "the permission ask", ui.PANEL, seconds=40)
+    walked = ui.walk(machine, "the feed", ui.PANEL)
+    answer = next((w for w in walked if w.frame and "look at the folder" in (w.value or w.title or "").lower()), None)
+    print("answer:", answer and (answer.role, answer.value, answer.frame))
+    assert answer, "the answer is not in the feed"
+    x, y, width, height = answer.frame
+    machine.click(int(x + width / 2), int(y + height / 2), "a click on the answer")
+    machine.sleep(1)
+    ui.type_text(machine, "typed after the click", "typing with the answer clicked")
+    machine.sleep(1)
+    _, window, header, found = _extent(machine, "fit 3 typed after a click on the answer")
+    machine.screenshot(check_dir, "fit 3 typed after a click on the answer")
+    assert "typed after the click" in (found.value or ""), f"the field holds: {found.value!r}"
+
+    # A screenshot alone on the clipboard — 0.9.20's field greyed Paste out for it (11-27).
+    machine.ssh.run("screencapture -x -R 0,0,640,400 /tmp/lab-shot.png && osascript -e "
+                    + shlex.quote('set the clipboard to (read (POSIX file "/tmp/lab-shot.png") as «class PNGf»)'),
+                    "a screenshot on the clipboard")
+    machine.click(*field.middle, "the field")
+    ui.ask(machine, ui._applescript(ui._PASTE, process=ui.PROCESS), "⌘V: the screenshot")
+    machine.sleep(1)
+    shot = [i for i in ui.identifiers(machine, "the field", ui.PANEL) if ".file." in i]
+    print("after the screenshot:", shot)
+    assert any(i.endswith("row.input.message.file.0]") for i in shot), "the screenshot is not attached"
+    machine.ssh.run("osascript -e " + shlex.quote(f'set the clipboard to POSIX file "{project}/notes.md"'), "a file on the clipboard")
+    ui.ask(machine, ui._applescript(ui._PASTE, process=ui.PROCESS), "⌘V: the file")
+    machine.sleep(1)
+    ids = ui.identifiers(machine, "the field", ui.PANEL)
+    print("attached:", [i for i in ids if ".file." in i])
+    machine.screenshot(check_dir, "fit 4 a Finder file pasted")
+    assert any("row.input.message.file.1" in i for i in ids), "the file is not attached after the screenshot"
+    machine.click(*allow.middle, "allowing the command")
+    machine.sleep(2)
