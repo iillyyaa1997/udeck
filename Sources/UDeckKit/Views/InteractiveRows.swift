@@ -687,7 +687,10 @@ struct BadgeView: View {
     var body: some View {
         let tone = badge.tone.map { BarStyle.color($0, theme) } ?? theme.muted
         HStack(spacing: 5) {
-            if badge.busy == true { BusyGlyph() }
+            if badge.busy == true {
+                BusyGlyph(size: theme.textSize - 1.5,
+                          color: NSColor(badge.tone == nil || badge.tone == .idle ? theme.muted : theme.text))
+            }
             if let icon = badge.icon { BarStyle.icon(icon) }
             let forms = badge.forms
             if forms.count > 1 {
@@ -725,28 +728,58 @@ struct BadgeView: View {
 
 /// The ✻ of a badge that is `busy`, turning through the glyphs a terminal's
 /// agent turns through while it works; still for Reduce Motion.
-struct BusyGlyph: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+///
+/// Drawn by AppKit on a timer, which runs whatever SwiftUI redraws. Measured
+/// turning in lab 45993518051: five different glyphs in seven shots over two
+/// seconds, with the guest's Reduce Motion off — the lab's guest has it on,
+/// and there the ✻ stands still, as it should.
+struct BusyGlyph: NSViewRepresentable {
+    let size: CGFloat
+    let color: NSColor
+
+    func makeNSView(context: Context) -> BusyGlyphView { BusyGlyphView() }
+
+    func updateNSView(_ view: BusyGlyphView, context: Context) {
+        view.font = .systemFont(ofSize: size)
+        view.color = color
+        view.needsDisplay = true
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: BusyGlyphView, context: Context) -> CGSize? {
+        CGSize(width: ceil(size * 0.95), height: ceil(size * 1.25))
+    }
+}
+
+final class BusyGlyphView: NSView {
     static let frames = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"]
+    var font = NSFont.systemFont(ofSize: 11)
+    var color = NSColor.labelColor
+    private(set) var index = 4
+    private var timer: Timer?
 
-    var body: some View {
-        Group {
-            if reduceMotion {
-                Text("✻")
-            } else {
-                TimelineView(.periodic(from: .now, by: 0.12)) { context in
-                    Text(Self.frame(at: context.date))
-                }
-            }
-        }
-        .frame(width: 11)
-        .accessibilityHidden(true)
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        timer?.invalidate()
+        timer = nil
+        guard window != nil, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let timer = Timer(timeInterval: 0.12, target: self, selector: #selector(turn), userInfo: nil, repeats: true)
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
-    static func frame(at date: Date) -> String {
-        let index = Int((date.timeIntervalSinceReferenceDate / 0.12).rounded(.down)) % frames.count
-        return frames[(index + frames.count) % frames.count]
+    @objc private func turn() {
+        index = (index + 1) % Self.frames.count
+        needsDisplay = true
     }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let glyph = NSAttributedString(string: Self.frames[index], attributes: [.font: font, .foregroundColor: color])
+        let size = glyph.size()
+        glyph.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
+    }
+
+    override func setAccessibilityElement(_ isElement: Bool) {}
+    override func isAccessibilityElement() -> Bool { false }
 }
 
 /// A menu drawn as a small pill (or plain text and a chevron, on a bar):
