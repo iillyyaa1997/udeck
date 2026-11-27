@@ -451,6 +451,11 @@ public final class PanelController {
             apply(.closeRequested)
             return
         }
+        // Timed like the gesture's (`settleWindow`): the whole panel, cards and
+        // all, is what the shortcut brings, and what is slow to arrive.
+        revealStarted = ProcessInfo.processInfo.systemUptime
+        mainThreadStalls.reset()
+        mainThreadStalls.start()
         apply(.revealRequested)
         apply(.interacted)
     }
