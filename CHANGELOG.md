@@ -8,6 +8,15 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.26] — 2026-11-27
+
+- **The panel opens smoothly again.** 0.9.25 kept a card's measures for the
+  field's suggestions — the feed's height, the room above the field — as view
+  state; the panel opens on a spring that changes both on every frame, so
+  each frame redrew the whole card. They no longer redraw anything.
+- Why a hover at the top of the screen did not open the panel is now kept in
+  the system log (it was logged at a level the system does not keep).
+
 ## [0.9.25] — 2026-11-27
 
 - **A field suggests commands, skills and files.** An input may say what it
