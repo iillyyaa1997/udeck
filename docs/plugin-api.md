@@ -563,7 +563,13 @@ uDeck 0.9.4 adds a fifth row, menus, and more to say in a feed:
 
 * `bar` — a line of small things, left to right: a `title` (bold, with a dot
   of its `tone`), a `menu`, a `tag` (outlined), a `badge` (tinted by its
-  `tone`; with `fill`, 0…1, it fills from the left like a battery), a `button`
+  `tone`; with `fill`, 0…1, it fills from the left like a battery; with
+  `busy: true`, uDeck 0.9.24 and later, a ✻ turns before its text — still
+  under Reduce Motion — so that something slow is seen to be going on; with
+  `shorter`, uDeck 0.9.24 and later, a list of shorter forms of its text,
+  longest first, uDeck shows the longest that fits the card and cuts the last
+  one short when none does, rather than letting the text run past the card's
+  edge — up to four are kept), a `button`
   (an icon, a `label` or both; a click sends `press` with its `id`, and with
   `options` it opens them as a menu and sends `choose`), and a `spacer`, after
   which everything sits at the right edge. The title gives way first when the
