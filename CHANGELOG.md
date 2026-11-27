@@ -8,6 +8,17 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.22] — 2026-11-27
+
+- **A plugin's card comes back as it was after an update.** A resident
+  plugin started again — every update of uDeck restarts it — was told its
+  windows kept nothing, so Agents could not continue the session a window
+  showed. It is told what each keeps now.
+- Agents (installed separately) closes its sessions when uDeck stops it, so
+  none is left running on its own and found «running elsewhere»; it brings
+  every open session back, keeps a message written while a session restarts
+  until it is up, and writes what it decided in ~/.udeck/agents/agents.log.
+
 ## [0.9.21] — 2026-11-27
 
 - **A screenshot pastes into a card's field again.** 0.9.20's field took a

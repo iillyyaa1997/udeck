@@ -136,8 +136,8 @@ public enum ContractFeatures {
     /// nothing in the contract; 0.9.14 brings a menu option's `button`; 0.9.15
     /// and 0.9.16 change nothing in it; 0.9.17 brings an input's `files`;
     /// 0.9.18 changes nothing in it; 0.9.19 brings an input's `fill`; 0.9.20
-    /// and 0.9.21 change nothing in it.
-    static let reviewedAt = "0.9.21"
+    /// to 0.9.22 change nothing in it.
+    static let reviewedAt = "0.9.22"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
