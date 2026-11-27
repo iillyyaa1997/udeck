@@ -226,10 +226,10 @@ public enum Agent {
         }
     }
 
-    public func close() async {
+    public func close(grace: Duration = .seconds(5)) async {
         switch self {
-        case .claude(let session): await session.close()
-        case .codex(let session): await session.close()
+        case .claude(let session): await session.close(grace: grace)
+        case .codex(let session): await session.close(grace: grace)
         }
     }
 

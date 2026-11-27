@@ -378,3 +378,37 @@ struct AgentsSendNowTests {
 private extension JSONValue {
     var encodedLineOrEmpty: String { (try? encodedLine()) ?? "\"\"" }
 }
+
+/// 11-27: uDeck's update stopped Agents and its `claude` lived on, an orphan
+/// still writing the session the new Agents then held back.
+@Suite("No claude left behind", .serialized)
+@MainActor
+struct AgentsOrphansTests {
+    @Test("an orphan is a resumed session's process with this plugin's flags whose parent is launchd")
+    func found() {
+        let listing = """
+          123     1 /Users/me/.local/bin/claude --output-format stream-json --verbose --input-format stream-json --resume 46c04e29-x --effort xhigh
+          124   999 /Users/me/.local/bin/claude --output-format stream-json --verbose --input-format stream-json --resume 46c04e29-x
+          125     1 /Users/me/.local/bin/claude --resume 46c04e29-x
+          126     1 /Users/me/.local/bin/claude --output-format stream-json --verbose --input-format stream-json --resume 0ccbd977-y
+        """
+        #expect(Orphans.resuming("46c04e29-x", in: listing) == [123])
+    }
+
+    @Test("closing everything, as the plugin stops, leaves no claude running")
+    func closeAll() async throws {
+        setenv("UDECK_SETTING_CLAUDE", "\"\(fakeClaude.path)\"", 1)
+        setenv("FAKE_CLAUDE_DELAY", "0", 1)
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("agents-close-all-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let app = AgentsApp(home: home) { _ in }
+        await app.newConversation(in: home, provider: .claude)
+        await app.newConversation(in: home, provider: .claude)
+        let pids = app.conversations.compactMap { $0.claude?.processIdentifier }
+        #expect(pids.count == 2)
+        try await until("both up") { app.conversations.allSatisfy { $0.claude?.state == .idle } }
+        await app.closeAll()
+        for pid in pids { #expect(kill(pid, 0) != 0, "claude \(pid) still runs") }
+    }
+}

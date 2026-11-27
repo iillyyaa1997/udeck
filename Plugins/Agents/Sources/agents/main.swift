@@ -16,6 +16,23 @@ func run() async {
         FileHandle.standardOutput.write(Data((line + "\n").utf8))
     }
     app.render()
+    // Stopped by uDeck's helper — SIGTERM, an update of uDeck — every session
+    // is closed first: before, this process died at once and each `claude` it
+    // ran lived on alone (11-27).
+    signal(SIGTERM, SIG_IGN)
+    signal(SIGHUP, SIG_IGN)
+    let stops = [SIGTERM, SIGHUP].map { number -> DispatchSourceSignal in
+        let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+        source.setEventHandler {
+            Task { @MainActor in
+                await app.closeAll()
+                exit(0)
+            }
+        }
+        source.resume()
+        return source
+    }
+    defer { stops.forEach { $0.cancel() } }
     // The conversation changes on its own (streaming, a question arriving):
     // the card is looked at five times a second and written when it changed.
     let ticker = Task { @MainActor in

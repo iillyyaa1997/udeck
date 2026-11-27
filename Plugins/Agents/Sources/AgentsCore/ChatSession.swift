@@ -487,9 +487,12 @@ public final class ChatSession: Identifiable {
 
     /// Ends the session the way closing the terminal would: stdin closed, the
     /// CLI finishes and exits. It can be resumed later by its id.
-    public func close() async {
+    /// The running `claude`'s process id, for the tests.
+    var processIdentifier: Int32? { connection?.processIdentifier }
+
+    public func close(grace: Duration = .seconds(5)) async {
         guard let connection else { return }
-        _ = await connection.close(grace: .seconds(5))
+        _ = await connection.close(grace: grace)
     }
 
     public var isEnded: Bool { if case .ended = state { true } else { false } }

@@ -391,9 +391,9 @@ public final class CodexSession: Identifiable {
         Task { try? await connection.send(CodexOutbound.decide(ask.ask, .string(decision))) }
     }
 
-    public func close() async {
+    public func close(grace: Duration = .seconds(5)) async {
         guard let connection else { return }
-        _ = await connection.close(grace: .seconds(5))
+        _ = await connection.close(grace: grace)
     }
 
     public func fail(_ reason: String) {

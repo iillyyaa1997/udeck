@@ -713,6 +713,8 @@ public final class AgentsApp {
         // about every operation.
         var arguments = prefix + ClaudeOutbound.arguments(model: session.chosenModel, resume: resume)
         if let effort = session.effort { arguments += ["--effort", effort] }
+        // One left by a run of this plugin that died: not a second writer.
+        if let resume { await Orphans.stop(resuming: resume) }
         do {
             let process = try AgentProcess(executable: executable, arguments: arguments, environment: environment,
                                            directory: session.folder)
@@ -785,6 +787,16 @@ public final class AgentsApp {
     /// Writes each place's card if it changed since the last one written:
     /// the place's name, and what it shows (`keep`, `name`) for uDeck to keep
     /// with it and to carry to a place of its own.
+    /// Every session closed, as the plugin stops: each `claude` and `codex`
+    /// given its end of input and a moment, then stopped — none left behind.
+    public func closeAll(grace: Duration = .seconds(1.5)) async {
+        // All at once: uDeck's helper gives the plugin a few seconds.
+        let closing = conversations.flatMap { $0.agents.values }.map { agent in
+            Task { await agent.close(grace: grace) }
+        }
+        for task in closing { await task.value }
+    }
+
     public func render() {
         if Date().timeIntervalSince(historyRead) > 30 { refreshHistory() }
         keepUnsent()
