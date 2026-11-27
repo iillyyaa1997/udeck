@@ -8,6 +8,18 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.21] — 2026-11-27
+
+- **A screenshot pastes into a card's field again.** 0.9.20's field took a
+  Finder file but not a picture alone on the clipboard: Paste was greyed out
+  and ⌘V did nothing. A file dropped on the field is attached, not written
+  out as its path.
+- Agents (the plugin, installed separately) brings back every session that
+  was open after it starts again — an update of uDeck restarts it — not only
+  the one a window kept; a message waiting for the step the agent is on can
+  be sent at once («Отправить сейчас»); the effort shows the level the CLI
+  runs with.
+
 ## [0.9.20] — 2026-11-26
 
 - **A card always fits the panel.** A grid row's height follows the panel:
