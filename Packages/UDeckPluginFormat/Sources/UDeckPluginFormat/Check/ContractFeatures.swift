@@ -137,8 +137,8 @@ public enum ContractFeatures {
     /// and 0.9.16 change nothing in it; 0.9.17 brings an input's `files`;
     /// 0.9.18 changes nothing in it; 0.9.19 brings an input's `fill`; 0.9.20
     /// to 0.9.22 change nothing in it; 0.9.23 brings a feed entry's `files`;
-    /// 0.9.24 a badge's `busy` and `shorter`.
-    static let reviewedAt = "0.9.24"
+    /// 0.9.24 a badge's `busy` and `shorter`; 0.9.25 an input's `suggest`.
+    static let reviewedAt = "0.9.25"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
@@ -227,12 +227,13 @@ public enum ContractFeatures {
         // forms for a narrow card: 0.9.24.
         add(.released(SemanticVersion(major: 0, minor: 9, patch: 24)), ["busy", "shorter"].map { .rowField(row: "bar.badge", field: $0) })
 
-        // What a field suggests — commands, skills, files: the next release.
-        add(.next, [.rowField(row: "input", field: "suggest")])
-        add(.next, InputSuggest.CodingKeys.allCases.map { .rowField(row: "input.suggest", field: $0.stringValue) })
-        add(.next, SuggestTab.CodingKeys.allCases.map { .rowField(row: "input.suggest.tabs", field: $0.stringValue) })
-        add(.next, SuggestItem.CodingKeys.allCases.map { .rowField(row: "input.suggest.items", field: $0.stringValue) })
-        add(.next, SuggestFound.CodingKeys.allCases.map { .rowField(row: "input.suggest.found", field: $0.stringValue) })
+        // What a field suggests — commands, skills, files: 0.9.25.
+        let suggestRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 25))
+        add(suggestRelease, [.rowField(row: "input", field: "suggest")])
+        add(suggestRelease, InputSuggest.CodingKeys.allCases.map { .rowField(row: "input.suggest", field: $0.stringValue) })
+        add(suggestRelease, SuggestTab.CodingKeys.allCases.map { .rowField(row: "input.suggest.tabs", field: $0.stringValue) })
+        add(suggestRelease, SuggestItem.CodingKeys.allCases.map { .rowField(row: "input.suggest.items", field: $0.stringValue) })
+        add(suggestRelease, SuggestFound.CodingKeys.allCases.map { .rowField(row: "input.suggest.found", field: $0.stringValue) })
 
         let fillRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 19))
         add(fillRelease, [.rowField(row: "input", field: "fill")])

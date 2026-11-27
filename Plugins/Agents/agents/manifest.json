@@ -3,7 +3,7 @@
   "name": "Agents",
   "version": "0.1.0",
   "api": 1,
-  "minUDeck": "0.9.24",
+  "minUDeck": "0.9.25",
   "kind": "resident",
   "description": "Sessions of AI agents on a card: start one in a folder, see it work, answer its questions and permissions, continue any saved one. Runs your own Claude Code and Codex, and moves a conversation between them.",
   "author": "uDeck",

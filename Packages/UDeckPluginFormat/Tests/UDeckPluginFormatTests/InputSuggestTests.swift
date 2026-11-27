@@ -41,7 +41,7 @@ struct InputSuggestTests {
         #expect(card.rows.count == 2, "the cut said in a row")
     }
 
-    @Test("dated to the next release, every field of it")
+    @Test("dated to 0.9.25, every field of it")
     func dated() throws {
         let object = try #require(StrictJSON.parse(Array(Self.json.utf8)).value?.object)
         let used = ContractFeatures.used(byCard: object)
@@ -50,7 +50,7 @@ struct InputSuggestTests {
                                          .rowField(row: "input.suggest.items", field: "note"),
                                          .rowField(row: "input.suggest.found", field: "query")] {
             #expect(used.contains(feature), "\(feature)")
-            #expect(ContractFeatures.release(of: feature) == .next, "\(feature)")
+            #expect(ContractFeatures.release(of: feature) == .released(SemanticVersion(major: 0, minor: 9, patch: 25)), "\(feature)")
         }
     }
 

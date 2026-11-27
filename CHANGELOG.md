@@ -8,6 +8,22 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.25] — 2026-11-27
+
+- **A field suggests commands, skills and files.** An input may say what it
+  suggests (`suggest`): tabs, each with a trigger — «/» at the start, «@»
+  anywhere — items, recent ones, and what a searched tab found, asked for with
+  the `suggest` event. uDeck draws the list above the field, taking its room
+  from the feed: *All* and the plugin's tabs, groups, recent ones first; ↑↓,
+  Tab, Return — which sends a command typed whole — Escape, ⌘1–9. It opens on
+  a trigger typed, from the «/» button by the field, with ⌘/ (⌘⇧/ for files)
+  and from the field's menu, then with a search of its own.
+- Agents (installed separately, needs this release) suggests claude's
+  commands in Russian — those that do nothing in a card or cost money left
+  out — its skills, Codex's skills, sent to Codex as skills, and the folder's
+  files on «@». /model, /effort and /clear are the card's own, as its menus;
+  in Codex, /compact, /review and /new too.
+
 ## [0.9.24] — 2026-11-27
 
 - **A live line that shows it is alive.** A badge may be `busy` — uDeck

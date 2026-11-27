@@ -125,7 +125,7 @@ struct ContractFeaturesTests {
         let inputFiles: Set<ContractFeature> = [.rowField(row: "input", field: "files")]
         // 0.9.23: a message's files in the feed.
         let feedFiles: Set<ContractFeature> = [.rowField(row: "feed", field: "files")]
-        // Waiting for the release after 0.9.24: what a field suggests.
+        // 0.9.25: what a field suggests.
         let suggest = ContractFeatures.registry.keys.filter {
             if case .rowField(let row, let field) = $0 { row.hasPrefix("input.suggest") || (row == "input" && field == "suggest") } else { false }
         }
@@ -139,7 +139,7 @@ struct ContractFeaturesTests {
         for (feature, release) in ContractFeatures.registry where feature != .manifestField("minUDeck") {
             switch feature {
             case _ where suggest.contains(feature):
-                #expect(release == .next, "\(feature)")
+                #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 25)), "\(feature)")
             case _ where liveBadge.contains(feature):
                 #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 24)), "\(feature)")
             case _ where feedFiles.contains(feature):
@@ -165,8 +165,7 @@ struct ContractFeaturesTests {
         let read = ContractRelease.released(SemanticVersion(major: 0, minor: 6, patch: 0))
         #expect(ContractFeatures.minimumUDeckReadFrom == read)
         #expect(ContractFeatures.release(of: .manifestField("minUDeck")) == Optional(read))
-        #expect(Set(ContractFeatures.registry.filter { $0.value == .next }.keys) == Set(suggest),
-                "only what a field suggests is waiting for a release")
+        #expect(!ContractFeatures.registry.values.contains(.next), "nothing is waiting for a release")
         // The release after this one, which has no number yet: after every
         // released one, and met only by a uDeck after this one.
         let current = try #require(SemanticVersion(UDeckRelease.version))
