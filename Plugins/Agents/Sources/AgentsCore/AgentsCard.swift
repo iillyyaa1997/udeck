@@ -221,7 +221,8 @@ enum AgentsCard {
             tone = "warn"
             busy = false
         default:
-            let step = doing(activity, app) + " " + clock(now.timeIntervalSince(agent.activitySince))
+            let stepTime = clock(now.timeIntervalSince(agent.activitySince))
+            let step = doing(activity, app) + " " + stepTime
             let silent = now.timeIntervalSince(agent.lastHeard)
             let quietIsTheTool: Bool = switch activity {
             case .tool, .asking: true
@@ -233,7 +234,12 @@ enum AgentsCard {
             forms = [[step, silence, total, tokens.map { tokenCount($0, app) }].compactMap { $0 },
                      [step, silence, total, tokens.map { tokenCount($0, app, short: true) }].compactMap { $0 },
                      [step, silence, tokens.map { tokenCount($0, app, short: true) }].compactMap { $0 },
-                     [step, silence].compactMap { $0 }]
+                     [step, silence].compactMap { $0 },
+                     // The narrowest, cut at its end by uDeck: what matters
+                     // most first — the silence, else the step's time — so
+                     // that a long tool's name is what is cut (lab 45989126124:
+                     // «Отправляет запрос 0:36 · ти…»).
+                     [silence.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? stepTime, doing(activity, app)]]
             tone = silence == nil ? "run" : "warn"
             if case .asking = activity { busy = false }
         }

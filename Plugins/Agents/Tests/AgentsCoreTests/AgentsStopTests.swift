@@ -152,13 +152,17 @@ struct AgentsStopTests {
         #expect(badge["tone"]?.string == "run")
         // Shorter for a narrow card, the step kept in each.
         let shorter = badge["shorter"]?.array?.compactMap(\.string) ?? []
-        #expect(shorter.last?.hasPrefix("Отправляет запрос 0:0") == true && shorter.last?.contains("·") == false, "\(shorter)")
+        #expect(shorter.dropLast().last?.hasPrefix("Отправляет запрос 0:0") == true
+            && shorter.dropLast().last?.contains("·") == false, "\(shorter)")
+        #expect(shorter.last?.hasPrefix("0:0") == true && shorter.last?.hasSuffix("· Отправляет запрос") == true,
+                "the narrowest keeps the time first: \(shorter)")
+        #expect(shorter.count <= 4, "uDeck keeps four")
         // Nothing from claude for 45 s while a call is out: said, in yellow.
         let later = try #require(AgentsCard.liveRow(conversation, app, now: Date().addingTimeInterval(45)))
         let quiet = try #require(later["items"]?.array?.first?["badge"])
         #expect(quiet["tone"]?.string == "warn")
         #expect(quiet["text"]?.string?.contains("тишина 0:4") == true, "\(quiet)")
-        #expect(quiet["shorter"]?.array?.last?.string?.contains("тишина 0:4") == true, "kept in the shortest form")
+        #expect(quiet["shorter"]?.array?.last?.string?.hasPrefix("Тишина 0:4") == true, "first in the narrowest form")
         await app.handle(#"{"event":"submit","row":"message","text":"second"}"#)
         await app.handle(#"{"event":"submit","row":"message","text":"third"}"#)
         await app.handle(#"{"event":"press","id":"stop"}"#)
