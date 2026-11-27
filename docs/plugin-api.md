@@ -321,6 +321,10 @@ What uDeck writes:
 * `choose` — an option of a menu was chosen (a `bar`'s menu or button, an
   `input`'s picker): the row's `id`, the menu's or button's `id`, the option's
   `id` (uDeck 0.9.4 and later).
+* `link` — a link in a feed that is not a web page's was clicked: the link
+  as `text`, and the modifier keys held as `keys` — `command`, `option`,
+  `shift`, `control` (uDeck 0.9.27 and later). Agents opens a `file:` link in
+  the editor, ⌘ in Finder, ⌥ in Quick Look.
 * `suggest` — a searched tab of an `input`'s suggestions wants items for
   what is typed: the row's `id`, the tab as `id`, the query as `text` (uDeck
   0.9.25 and later). Answer with the card, the items in `suggest.found`.
@@ -630,7 +634,14 @@ uDeck 0.9.4 adds a fifth row, menus, and more to say in a feed:
   Quick Look, the entry's files one after another. A uDeck before it draws
   the text alone. An `assistant` entry's text is
   markdown: paragraphs, `-` and `1.` lists, `#` headings, fenced code, and
-  inline emphasis, code and links.
+  inline emphasis, code and links. uDeck 0.9.27 and later draw more of it:
+  lists nested by their indent, heading levels, fenced code with its language
+  over it and a Copy button, `>` quotes, `---` rules and tables — a clean
+  table where it fits the card, and where it does not, a list: each row's
+  first cell as its title, the others in a line under it. An earlier uDeck
+  shows those as their text. A link to a web page opens in the browser; any
+  other link — a `file:` one, say, with `#L12` for a line — is the plugin's to
+  open: uDeck sends `link` with it.
 * Tones are `run`, `wait`, `idle`, `ok`, `warn`, `crit` and `info`; bar icons
   are `plus`, `history`, `folder`, `model`, `effort`, `account`, `gear`, `run`,
   `wait`, `done`, `idle` and `info`. Both are closed sets, like the list icons.
