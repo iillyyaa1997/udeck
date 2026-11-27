@@ -158,7 +158,7 @@ struct SuggestList: View {
             // As tall as what it holds, up to the room it has; then it scrolls.
             ScrollViewReader { proxy in
                 ScrollView(.vertical) { list(shown) }
-                    .frame(height: min(maxHeight, Self.height(of: shown, textSize: theme.textSize)))
+                    .frame(height: min(max(36, maxHeight - chrome), Self.height(of: shown, textSize: theme.textSize)))
                     .onChange(of: state.highlighted) { _, index in
                         let items = shown.flatMap(\.items)
                         if items.indices.contains(index) { proxy.scrollTo(items[index].id) }
@@ -186,6 +186,13 @@ struct SuggestList: View {
     }
 
     private var searchKey: String { (state.tab ?? "") + "\u{1}" + state.query }
+
+    /// What the list takes besides its rows: the tabs, the search, the keys
+    /// and the padding — `maxHeight` is the whole list's.
+    private var chrome: CGFloat {
+        let line = ceil(theme.textSize * 1.25)
+        return (tabs.count > 1 || state.searching ? line + 8 : 0) + (state.searching ? line + 14 : 0) + line + 16
+    }
 
     private var tabBar: some View {
         HStack(spacing: 4) {

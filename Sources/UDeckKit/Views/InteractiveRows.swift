@@ -324,6 +324,18 @@ struct InputRowView: View {
     @State private var handle = EditorHandle()
     /// Room above the field in the card, for the list over it.
     @State private var roomAbove: CGFloat = 240
+    /// The feed's height, which an open list takes its room from — what the
+    /// card can give; the other rows do not shrink (lab 45996031854: a list
+    /// with a question open pushed the field past the card's bottom).
+    @Environment(\.feedHeight) private var feedHeight
+    /// The room the open list has, set as it opens.
+    @State private var listRoom: CGFloat = 200
+
+    /// What the list may take: the feed less a little of it kept in view; or,
+    /// with no feed, part of the room above.
+    private func measureListRoom() {
+        listRoom = feedHeight > 0 ? feedHeight - 56 : roomAbove * 0.6
+    }
 
     private var suggest: InputSuggest? {
         guard let suggest = input.suggest, !suggest.tabs.isEmpty, input.enabled != false else { return nil }
@@ -491,7 +503,7 @@ struct InputRowView: View {
     private var suggestionList: some View {
         if let suggest, suggesting.open {
             SuggestList(rowID: input.id, suggest: suggest, theme: theme, state: suggesting,
-                        maxHeight: max(90, min(260, roomAbove * 0.6)), pick: pick, send: send)
+                        maxHeight: max(70, min(260, listRoom)), pick: pick, send: send)
         }
     }
 
@@ -519,6 +531,7 @@ struct InputRowView: View {
     private func openSuggestions(tab: String? = nil, searched: Bool = false) {
         guard let suggest else { return }
         suggesting.close()
+        measureListRoom()
         // The list's search takes the keyboard from the field.
         handle.view?.window?.makeFirstResponder(nil)
         suggesting.searching = true
@@ -539,6 +552,7 @@ struct InputRowView: View {
             if suggesting.dismissedAt == token.range.location { return }
             suggesting.dismissedAt = nil
             if !suggesting.open || suggesting.searching || suggesting.token?.trigger != token.trigger {
+                if !suggesting.open { measureListRoom() }
                 suggesting.close()
                 suggesting.scope = token.tabs
                 suggesting.tab = token.tabs.count == 1 ? token.tabs[0] : nil

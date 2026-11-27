@@ -10,6 +10,8 @@ import UDeckCore
 struct CardBodyView: View {
     /// The card's own space: a field's suggestions measure the room above it in it.
     static let space = "udeck.card.body"
+    /// How tall the card's feed is: the room a field's suggestions can take.
+    @State private var feedHeight: CGFloat = 0
 
     var card: Card
     var presentation: CardPresentation
@@ -48,9 +50,11 @@ struct CardBodyView: View {
                 let row = keyed.row
                 if case .feed = row {
                     rowView(row).frame(maxHeight: .infinity).layoutPriority(-1)
+                        .background(GeometryReader { Color.clear.preference(key: FeedHeight.self, value: $0.size.height) })
                 } else if case .input = row {
-                    // Over what follows it: its suggestions open over the card.
+                    // Its suggestions take their room from the feed's.
                     rowView(row).fixedSize(horizontal: false, vertical: true).zIndex(1)
+                        .environment(\.feedHeight, feedHeight)
                 } else {
                     rowView(row).fixedSize(horizontal: false, vertical: true)
                 }
@@ -79,6 +83,7 @@ struct CardBodyView: View {
             }
         }
         .coordinateSpace(name: CardBodyView.space)
+        .onPreferenceChange(FeedHeight.self) { feedHeight = $0 }
     }
 
     private func failedRun(_ failed: FailureOnAFreshCard) -> some View {
@@ -361,4 +366,15 @@ struct TableRowsView: View {
         }
         .scrollIndicators(.never)
     }
+}
+
+/// The height of a card's feed, measured where it is drawn.
+struct FeedHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+extension EnvironmentValues {
+    /// The card's feed's height, for a field's suggestions: 0 with no feed.
+    @Entry var feedHeight: CGFloat = 0
 }
