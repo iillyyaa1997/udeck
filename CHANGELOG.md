@@ -8,6 +8,15 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.29] — 2026-11-27
+
+- **Resting the pointer on the notch opens the panel.** It listened only to
+  the top six points of a notch about thirty tall, so a pointer on the notch
+  did nothing until pushed to the very edge. The whole notch counts now; the
+  menu bar beside it keeps the thin strip.
+- The panel opened by the keyboard shortcut is timed in the log as well, the
+  whole panel with its cards being what is slow to arrive.
+
 ## [0.9.28] — 2026-11-27
 
 - **A feed's text is read once.** A card redrawn — and the panel redraws it as
