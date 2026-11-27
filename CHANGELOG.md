@@ -8,6 +8,23 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.27] — 2026-11-27
+
+- **Tables, quotes, rules and code with Copy in a feed.** A table is a clean
+  table where it fits the card, and where it does not, a list: the first
+  cell of each row as its title, the rest in a line under it. Lists nest by
+  their indent; fenced code shows its language and a Copy button, strings
+  and comments a shade apart. A link that is not a web page's is the
+  plugin's to open: the new `link` event, with the keys held.
+- **Plugins back in seconds after an update.** uDeck now starts the helper of
+  the version before it again as soon as it cuts every connection, not after
+  10 s; the helper gives a plugin 10 s to go on its own, not 21.
+- Agents (installed separately, needs this release) makes paths to files in
+  its answers links: a click opens the file in the editor at its line — the
+  Mac's choice, VS Code, Xcode, Cursor or Zed, a new setting — ⌘ shows it in
+  Finder, ⌥ in Quick Look. It no longer waits without end for a `claude` that
+  does not go when asked.
+
 ## [0.9.26] — 2026-11-27
 
 - **The panel opens smoothly again.** 0.9.25 kept a card's measures for the
