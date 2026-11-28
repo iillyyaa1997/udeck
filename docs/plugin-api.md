@@ -470,6 +470,11 @@ type keys is an error, not a guess, and uDeck will say so rather than pick one.
 
 { "meter": { "value": 0.32, "label": "week", "caption": "32%", "state": "ok" } }
                                                // value is 0…1 and is clamped
+{ "meter": { "value": 0.27, "label": "Context", "caption": "249k of 1M", "parts": [
+    { "value": 0.232, "label": "Conversation", "note": "232k", "tone": "warn" },
+    { "value": 0.009, "label": "Skills", "note": "9k", "tone": "info" } ] } }
+                                               // uDeck 0.9.32: a bar made of parts, each
+                                               // its share of the whole, said under it
 
 { "list": [
     { "text": "u-pilot", "note": "1d15h", "icon": "wait", "state": "warn" },
@@ -611,7 +616,10 @@ uDeck 0.9.4 adds a fifth row, menus, and more to say in a feed:
   `shorter`, uDeck 0.9.24 and later, a list of shorter forms of its text,
   longest first, uDeck shows the longest that fits the card and cuts the last
   one short when none does, rather than letting the text run past the card's
-  edge — up to four are kept), a `button`
+  edge — up to four are kept; with `details`, uDeck 0.9.32 and later, a
+  list of rows — any a card has, up to 24 — that a click on the badge shows
+  beside it: what a short badge stands for, said in full, with buttons that
+  send their events as on the card; a badge among them shows none), a `button`
   (an icon, a `label` or both; a click sends `press` with its `id`, and with
   `options` it opens them as a menu and sends `choose`), and a `spacer`, after
   which everything sits at the right edge. The title gives way first when the

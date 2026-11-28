@@ -134,11 +134,15 @@ public struct BarBadge: Codable, Equatable, Sendable {
     /// short if even it does not — rather than the end of the text going
     /// past the card's edge.
     public var shorter: [String]?
+    /// Rows a click on the badge shows, beside it (0.9.32): what a short
+    /// badge stands for, said in full — any rows a card has, buttons in them
+    /// sending their events as on the card. A badge inside them shows none.
+    public var details: [CardRow]?
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case text, tone, icon, fill, busy, shorter }
+    enum CodingKeys: String, CodingKey, CaseIterable { case text, tone, icon, fill, busy, shorter, details }
 
     public init(text: String, tone: CardTone? = nil, icon: BarIcon? = nil, fill: Double? = nil,
-                busy: Bool? = nil, shorter: [String]? = nil)
+                busy: Bool? = nil, shorter: [String]? = nil, details: [CardRow]? = nil)
     {
         self.text = text
         self.tone = tone
@@ -146,6 +150,7 @@ public struct BarBadge: Codable, Equatable, Sendable {
         self.fill = fill.map { min(max($0, 0), 1) }
         self.busy = busy
         self.shorter = shorter
+        self.details = details.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     public init(from decoder: any Decoder) throws {
@@ -156,7 +161,8 @@ public struct BarBadge: Codable, Equatable, Sendable {
             icon: try c.decodeIfPresent(BarIcon.self, forKey: .icon),
             fill: try c.decodeIfPresent(Double.self, forKey: .fill),
             busy: try c.decodeIfPresent(Bool.self, forKey: .busy),
-            shorter: try c.decodeIfPresent([String].self, forKey: .shorter)
+            shorter: try c.decodeIfPresent([String].self, forKey: .shorter),
+            details: try c.decodeIfPresent([CardRow].self, forKey: .details)
         )
     }
 

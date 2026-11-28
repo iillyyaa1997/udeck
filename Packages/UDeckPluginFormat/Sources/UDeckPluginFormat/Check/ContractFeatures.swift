@@ -247,6 +247,9 @@ public enum ContractFeatures {
         add(.next, ["group", "section"].map { .settingField($0) })
         add(.next, [.settingTranslationField("section")])
         add(.next, SettingGroup.CodingKeys.allCases.map { .settingGroupField($0.stringValue) })
+        // A badge that says more when clicked, and a meter made of parts: 0.9.32.
+        add(.next, [.rowField(row: "bar.badge", field: "details"), .rowField(row: "meter", field: "parts")])
+        add(.next, MeterPart.CodingKeys.allCases.map { .rowField(row: "meter.parts", field: $0.stringValue) })
 
         let fillRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 19))
         add(fillRelease, [.rowField(row: "input", field: "fill")])
@@ -319,7 +322,8 @@ public enum ContractFeatures {
         for field in present(card) { used.insert(.cardField(field)) }
         for field in present(card.first("attention")?.object) { used.insert(.rowField(row: "attention", field: field)) }
         state(card.first("state"))
-        for row in card.first("rows")?.array ?? [] {
+        func walk(_ rows: [StrictJSON.Value]) {
+        for row in rows {
             guard let object = row.object, object.keys.count == 1, let kind = object.keys.first else { continue }
             used.insert(.row(kind))
             let body = object.first(kind)
@@ -349,6 +353,7 @@ public enum ContractFeatures {
                     for field in present(inner) { used.insert(.rowField(row: path, field: field)) }
                     if let tone = inner?.first("tone")?.string { used.insert(.tone(tone)) }
                     if let icon = inner?.first("icon")?.string { used.insert(.barIcon(icon)) }
+                    if name == "badge", let details = inner?.first("details")?.array { walk(details) }
                     for option in inner?.first("options")?.array ?? [] {
                         for field in present(option.object) { used.insert(.rowField(row: "menu.options", field: field)) }
                         for field in present(option.object?.first("button")?.object) {
@@ -388,8 +393,14 @@ public enum ContractFeatures {
             default:
                 for field in present(body?.object) { used.insert(.rowField(row: kind, field: field)) }
                 state(body?.object?.first("state"))
+                for part in body?.object?.first("parts")?.array ?? [] where kind == "meter" {
+                    for field in present(part.object) { used.insert(.rowField(row: "meter.parts", field: field)) }
+                    if let tone = part.object?.first("tone")?.string { used.insert(.tone(tone)) }
+                }
             }
         }
+        }
+        walk(card.first("rows")?.array ?? [])
         for action in card.first("actions")?.array ?? [] {
             for field in present(action.object) { used.insert(.actionField(field)) }
         }

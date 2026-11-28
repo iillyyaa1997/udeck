@@ -42,15 +42,21 @@ public struct MeterRow: Codable, Equatable, Sendable {
     public var label: String?
     public var caption: String?
     public var state: CardState?
+    /// What the bar is made of, in order (0.9.32): each part's share of the
+    /// whole bar, drawn one after the other in its tone, and said under it
+    /// with its label and note. `value` is then the parts together.
+    public var parts: [MeterPart]?
 
-    public init(value: Double, label: String? = nil, caption: String? = nil, state: CardState? = nil) {
+    public init(value: Double, label: String? = nil, caption: String? = nil, state: CardState? = nil,
+                parts: [MeterPart]? = nil) {
         self.value = min(max(value, 0), 1)
         self.label = label
         self.caption = caption
         self.state = state
+        self.parts = parts.flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case value, label, caption, state }
+    enum CodingKeys: String, CodingKey, CaseIterable { case value, label, caption, state, parts }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -58,8 +64,34 @@ public struct MeterRow: Codable, Equatable, Sendable {
             value: try c.decode(Double.self, forKey: .value),
             label: try c.decodeIfPresent(String.self, forKey: .label),
             caption: try c.decodeIfPresent(String.self, forKey: .caption),
-            state: try c.decodeIfPresent(CardState.self, forKey: .state)
+            state: try c.decodeIfPresent(CardState.self, forKey: .state),
+            parts: try c.decodeIfPresent([MeterPart].self, forKey: .parts)
         )
+    }
+}
+
+/// One part of a `meter` (0.9.32): its share of the whole bar, 0…1, its
+/// label and a note — `232k` — and the tone it is drawn in.
+public struct MeterPart: Codable, Equatable, Sendable {
+    public var value: Double
+    public var label: String
+    public var note: String?
+    public var tone: CardTone?
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case value, label, note, tone }
+
+    public init(value: Double, label: String, note: String? = nil, tone: CardTone? = nil) {
+        self.value = min(max(value, 0), 1)
+        self.label = label
+        self.note = note
+        self.tone = tone
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(value: try c.decode(Double.self, forKey: .value), label: try c.decode(String.self, forKey: .label),
+                  note: try c.decodeIfPresent(String.self, forKey: .note),
+                  tone: try? c.decodeIfPresent(CardTone.self, forKey: .tone))
     }
 }
 

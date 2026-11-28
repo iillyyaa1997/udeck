@@ -854,6 +854,9 @@ struct BarRowView: View {
     let bar: BarRow
     let theme: DeckTheme
     let send: (ResidentEvent) -> Void
+    /// Draws a badge's `details` — the card's own rows, as the card draws
+    /// them; nil where a badge says no more (a window's header).
+    var details: (([CardRow]) -> AnyView)? = nil
 
     var body: some View {
         HStack(spacing: 6) {
@@ -877,7 +880,10 @@ struct BarRowView: View {
                 case .item(.badge(let badge)):
                     // One with shorter forms takes the width there is and picks
                     // the form that fits it; one without is as wide as its text.
-                    if badge.forms.count > 1 {
+                    if let rows = badge.details, let details {
+                        DetailedBadge(badge: badge, theme: theme, rows: rows, row: bar.id, draw: details)
+                            .layoutPriority(badge.forms.count > 1 ? 1 : 0)
+                    } else if badge.forms.count > 1 {
                         BadgeView(badge: badge, theme: theme).layoutPriority(1)
                     } else {
                         BadgeView(badge: badge, theme: theme).fixedSize()
@@ -1043,6 +1049,42 @@ struct BadgeView: View {
                 .clipShape(Capsule())
             }
         )
+    }
+}
+
+/// A badge that says more when clicked (0.9.32): its `details`, the card's
+/// own rows, in a popover beside it — what «25% · 249k / 1M» is made of, and
+/// what can be done about it.
+struct DetailedBadge: View {
+    let badge: BarBadge
+    let theme: DeckTheme
+    let rows: [CardRow]
+    let row: String
+    let draw: ([CardRow]) -> AnyView
+    @State private var open = false
+    @State private var hovering = false
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            BadgeView(badge: badge, theme: theme)
+                .fixedSize(horizontal: badge.forms.count <= 1, vertical: false)
+                .overlay(Capsule().strokeBorder(theme.line.opacity(open || hovering ? 1 : 0)))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityIdentifier("row.\(row).badge.details")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            ScrollView {
+                draw(rows)
+                    .padding(12)
+            }
+            .frame(width: 320)
+            .frame(maxHeight: 520)
+            .fixedSize(horizontal: false, vertical: true)
+            .environment(\.deckTheme, theme)
+            .onDisappear { PopoverPresence.closedAt = ProcessInfo.processInfo.systemUptime }
+        }
     }
 }
 

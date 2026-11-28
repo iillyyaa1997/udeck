@@ -71,6 +71,9 @@ public struct CardLimits: Sendable, Equatable {
     static let pickers = 4
     /// A badge's shorter forms.
     static let badgeForms = 4
+    /// The rows a badge shows when clicked, and a meter's parts.
+    static let badgeDetails = 24
+    static let meterParts = 12
     /// What a field suggests: its tabs, its items, what was found, recent ones.
     static let suggestTabs = 8
     static let suggestItems = 500
@@ -117,7 +120,7 @@ extension Card {
         trimmed.chip = chip.map(trim)
 
         if rows.count > limits.rows { cut = true }
-        trimmed.rows = rows.prefix(limits.rows).map { row in
+        func trimRow(_ row: CardRow, nested: Bool) -> CardRow {
             switch row {
             case .text(let value):
                 return .text(trim(value))
@@ -126,9 +129,13 @@ extension Card {
                 return .keyValue(KeyValueRow(label: trim(kv.label), value: trim(kv.value), state: kv.state))
 
             case .meter(let meter):
+                if (meter.parts?.count ?? 0) > CardLimits.meterParts { cut = true }
                 return .meter(MeterRow(
                     value: meter.value, label: meter.label.map(trim),
-                    caption: meter.caption.map(trim), state: meter.state
+                    caption: meter.caption.map(trim), state: meter.state,
+                    parts: meter.parts.map { $0.prefix(CardLimits.meterParts).map {
+                        MeterPart(value: $0.value, label: trim($0.label), note: $0.note.map(trim), tone: $0.tone)
+                    } }
                 ))
 
             case .list(let items):
@@ -237,7 +244,12 @@ extension Card {
                     case .badge(let badge):
                         .badge(BarBadge(text: trim(badge.text), tone: badge.tone, icon: badge.icon, fill: badge.fill,
                                         busy: badge.busy,
-                                        shorter: badge.shorter.map { Array($0.prefix(CardLimits.badgeForms).map(trim)) }))
+                                        shorter: badge.shorter.map { Array($0.prefix(CardLimits.badgeForms).map(trim)) },
+                                        // One level: a badge in the rows it shows shows none.
+                                        details: nested ? nil : badge.details.map {
+                                            if $0.count > CardLimits.badgeDetails { cut = true }
+                                            return $0.prefix(CardLimits.badgeDetails).map { trimRow($0, nested: true) }
+                                        }))
                     case .menu(let value): .menu(menu(value))
                     case .button(let button):
                         .button(BarButton(id: button.id, icon: button.icon, label: button.label.map(trim),
@@ -254,6 +266,7 @@ extension Card {
                 return .unsupported(kind: trim(kind))
             }
         }
+        trimmed.rows = rows.prefix(limits.rows).map { trimRow($0, nested: false) }
 
         if actions.count > limits.actions { cut = true }
         trimmed.actions = actions.prefix(limits.actions).map { action in

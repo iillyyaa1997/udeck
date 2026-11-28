@@ -23,6 +23,7 @@ struct ContractFeaturesTests {
         features += SettingDeclaration.Kind.allCases.map { .settingType($0.rawValue) }
         features += SettingOption.CodingKeys.allCases.map { .optionField($0.stringValue) }
         features += SettingGroup.CodingKeys.allCases.map { .settingGroupField($0.stringValue) }
+        features += MeterPart.CodingKeys.allCases.map { .rowField(row: "meter.parts", field: $0.stringValue) }
         features.append(.translations)
         features += ManifestTranslation.CodingKeys.allCases.map { .translationField($0.stringValue) }
         features += SettingTranslation.CodingKeys.allCases.map { .settingTranslationField($0.stringValue) }
@@ -142,6 +143,9 @@ struct ContractFeaturesTests {
                                             .settingField("group"), .settingField("section"),
                                             .settingTranslationField("section")]
         for field in ["id", "label", "preview"] { groups.insert(.settingGroupField(field)) }
+        groups.insert(.rowField(row: "bar.badge", field: "details"))
+        groups.insert(.rowField(row: "meter", field: "parts"))
+        for field in ["value", "label", "note", "tone"] { groups.insert(.rowField(row: "meter.parts", field: field)) }
         for (feature, release) in ContractFeatures.registry where feature != .manifestField("minUDeck") {
             switch feature {
             case _ where groups.contains(feature):

@@ -131,6 +131,9 @@ struct CardBodyView: View {
                     .foregroundStyle(kv.state.map(theme.color(for:)) ?? theme.text)
             }
 
+        case .meter(let meter) where meter.parts != nil:
+            PartedMeter(meter: meter, theme: theme)
+
         case .meter(let meter):
             VStack(alignment: .leading, spacing: 4) {
                 if meter.label != nil || meter.caption != nil {
@@ -244,7 +247,11 @@ struct CardBodyView: View {
             InputRowView(input: input, theme: theme, send: send,
                          draftKey: (windowID?.uuidString ?? "") + "/" + pluginID.rawValue)
         case .bar(let bar):
-            BarRowView(bar: bar, theme: theme, send: send)
+            BarRowView(bar: bar, theme: theme, send: send) { rows in
+                AnyView(VStack(alignment: .leading, spacing: theme.rowSpacing) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in rowView(row) }
+                })
+            }
 
         case .unsupported(let kind):
             // Kept rather than dropped: a hole in a card with no explanation is
@@ -405,5 +412,53 @@ enum FeedLinks {
         if flags.contains(.shift) { keys.append("shift") }
         if flags.contains(.control) { keys.append("control") }
         return keys
+    }
+}
+
+/// A meter made of parts (0.9.32): one bar, each part its share of it in its
+/// tone, the rest of it empty, and under it a line for each part — its colour,
+/// its label and its note.
+struct PartedMeter: View {
+    let meter: MeterRow
+    let theme: DeckTheme
+
+    private static let palette: [CardTone] = [.warn, .info, .run, .ok, .wait, .idle]
+
+    private func color(_ part: MeterPart, _ index: Int) -> Color {
+        BarStyle.color(part.tone ?? Self.palette[index % Self.palette.count], theme)
+    }
+
+    var body: some View {
+        let parts = meter.parts ?? []
+        VStack(alignment: .leading, spacing: 5) {
+            if meter.label != nil || meter.caption != nil {
+                HStack {
+                    Text(meter.label ?? "").font(theme.bodyFont.weight(.semibold)).foregroundStyle(theme.text)
+                    Spacer(minLength: 6)
+                    Text(meter.caption ?? "").font(theme.monoFont).monospacedDigit().foregroundStyle(theme.muted)
+                }
+            }
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+                    ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
+                        Rectangle().fill(color(part, index)).frame(width: max(0, geometry.size.width * part.value))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .background(theme.recess)
+                .clipShape(Capsule())
+            }
+            .frame(height: 8)
+            ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
+                HStack(spacing: 7) {
+                    RoundedRectangle(cornerRadius: 2).fill(color(part, index)).frame(width: 9, height: 9)
+                    Text(part.label).font(theme.smallFont).foregroundStyle(theme.text).lineLimit(1)
+                    Spacer(minLength: 6)
+                    if let note = part.note {
+                        Text(note).font(theme.smallFont).monospacedDigit().foregroundStyle(theme.muted)
+                    }
+                }
+            }
+        }
     }
 }
