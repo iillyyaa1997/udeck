@@ -138,7 +138,7 @@ struct ContractFeaturesTests {
         let inputFill: Set<ContractFeature> = [.rowField(row: "input", field: "fill"),
                                                .rowField(row: "input.fill", field: "id"),
                                                .rowField(row: "input.fill", field: "text")]
-        // Waiting for the next release: settings in groups, with a preview.
+        // 0.9.32: settings in groups with a preview, a badge's details, a meter's parts.
         var groups: Set<ContractFeature> = [.manifestField("settingGroups"), .translationField("settingGroups"),
                                             .settingField("group"), .settingField("section"),
                                             .settingTranslationField("section")]
@@ -149,7 +149,7 @@ struct ContractFeaturesTests {
         for (feature, release) in ContractFeatures.registry where feature != .manifestField("minUDeck") {
             switch feature {
             case _ where groups.contains(feature):
-                #expect(release == .next, "\(feature)")
+                #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 32)), "\(feature)")
             case _ where suggest.contains(feature):
                 #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 25)), "\(feature)")
             case _ where liveBadge.contains(feature):
@@ -177,8 +177,7 @@ struct ContractFeaturesTests {
         let read = ContractRelease.released(SemanticVersion(major: 0, minor: 6, patch: 0))
         #expect(ContractFeatures.minimumUDeckReadFrom == read)
         #expect(ContractFeatures.release(of: .manifestField("minUDeck")) == Optional(read))
-        #expect(ContractFeatures.registry.filter { $0.value == .next }.keys.allSatisfy(groups.contains),
-                "nothing else is waiting for a release")
+        #expect(!ContractFeatures.registry.values.contains(.next), "nothing is waiting for a release")
         // The release after this one, which has no number yet: after every
         // released one, and met only by a uDeck after this one.
         let current = try #require(SemanticVersion(UDeckRelease.version))

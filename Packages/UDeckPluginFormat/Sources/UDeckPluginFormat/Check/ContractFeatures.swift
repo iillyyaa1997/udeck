@@ -142,8 +142,9 @@ public enum ContractFeatures {
     /// to 0.9.22 change nothing in it; 0.9.23 brings a feed entry's `files`;
     /// 0.9.24 a badge's `busy` and `shorter`; 0.9.25 an input's `suggest`;
     /// 0.9.26 changes nothing in it, nor does 0.9.27 (its `link` event and the
-    /// feed's tables are the docs'), nor 0.9.28 to 0.9.31.
-    static let reviewedAt = "0.9.31"
+    /// feed's tables are the docs'), nor 0.9.28 to 0.9.31; 0.9.32 brings
+    /// settings in groups with a preview, a badge's details and a meter's parts.
+    static let reviewedAt = "0.9.32"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
@@ -243,13 +244,14 @@ public enum ContractFeatures {
         // Settings in groups, each a tab, with a card the plugin draws beside
         // them: 0.9.32 (the `settings` and `preview` events, and the
         // `preview` it answers with, are the docs').
-        add(.next, [.manifestField("settingGroups"), .translationField("settingGroups")])
-        add(.next, ["group", "section"].map { .settingField($0) })
-        add(.next, [.settingTranslationField("section")])
-        add(.next, SettingGroup.CodingKeys.allCases.map { .settingGroupField($0.stringValue) })
+        let groupsRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 32))
+        add(groupsRelease, [.manifestField("settingGroups"), .translationField("settingGroups")])
+        add(groupsRelease, ["group", "section"].map { .settingField($0) })
+        add(groupsRelease, [.settingTranslationField("section")])
+        add(groupsRelease, SettingGroup.CodingKeys.allCases.map { .settingGroupField($0.stringValue) })
         // A badge that says more when clicked, and a meter made of parts: 0.9.32.
-        add(.next, [.rowField(row: "bar.badge", field: "details"), .rowField(row: "meter", field: "parts")])
-        add(.next, MeterPart.CodingKeys.allCases.map { .rowField(row: "meter.parts", field: $0.stringValue) })
+        add(groupsRelease, [.rowField(row: "bar.badge", field: "details"), .rowField(row: "meter", field: "parts")])
+        add(groupsRelease, MeterPart.CodingKeys.allCases.map { .rowField(row: "meter.parts", field: $0.stringValue) })
 
         let fillRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 19))
         add(fillRelease, [.rowField(row: "input", field: "fill")])

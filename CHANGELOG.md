@@ -8,6 +8,25 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.32] — 2026-11-28
+
+- **A plugin's settings in tabs, with a live sample beside them.** A plugin
+  can group its settings — each group a tab of its own in Settings → Plugins,
+  with headings — and draw a card that shows what a group does, redrawn as
+  the settings change. A running plugin is told its settings again after
+  each change, without starting over.
+- **A badge that says more when clicked, and a bar made of parts** — for
+  plugins to show what a short number stands for.
+- Agents (installed separately, needs this release) shows the context the
+  way you set it up: «25% · 249k / 1M», live as the agent works, and on a
+  click what it is made of, how it grew, turns left, what took the most,
+  the cache, the week, the session's cost and time, the model and the
+  account, with buttons to compact, to compact with a hint, or to start a new
+  chat carrying the summary. It compacts in the pause after a turn past 70%,
+  not in the middle of one; a compaction is marked in the feed with its
+  summary; ☕ replaces the two lines about the Mac staying awake. Every part
+  is a setting, in Settings → Plugins → Agents → «Контекст».
+
 ## [0.9.31] — 2026-11-28
 
 - **The peek's text is inside the panel again.** 0.9.30 laid the peek out at
