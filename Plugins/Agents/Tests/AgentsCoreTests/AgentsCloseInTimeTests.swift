@@ -103,7 +103,7 @@ struct AgentsMachineMessagesTests {
         try await until("idle after /compact") { session.state == .idle }
         try await until("the context after it") { session.context?.percent == 2 }
         #expect(answers() == 1, "the output /compact says again is not drawn twice")
-        #expect(session.items.filter { if case .note(_, "compacted") = $0 { true } else { false } }.count == 1)
+        #expect(session.items.filter { if case .note(_, let text) = $0 { text.hasPrefix("compacted") } else { false } }.count == 1)
         #expect(session.items.filter { if case .user(_, "/compact") = $0 { true } else { false } }.count == 1)
         await session.close()
     }

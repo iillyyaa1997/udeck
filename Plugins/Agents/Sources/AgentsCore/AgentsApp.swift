@@ -31,6 +31,15 @@ public final class AgentsApp {
     /// The files found for the last «@» query, by place.
     public internal(set) var foundFiles: [String: (query: String, files: [String])] = [:]
     public private(set) var russian = false
+    /// Settings as the last `settings` event said them (uDeck 0.9.32).
+    var settingsTold: JSONValue?
+
+    /// The plugin's settings: as it started with them, and as changed since.
+    public var settings: AgentsSettings {
+        var settings = AgentsSettings(environment: ProcessInfo.processInfo.environment)
+        settings.update(settingsTold)
+        return settings
+    }
 
     /// The conversation shown here.
     public var selection: UUID? {
@@ -177,7 +186,17 @@ public final class AgentsApp {
             suggested(tab: event["id"]?.string ?? "", query: event["text"]?.string ?? "")
         case "link":
             FileOpener.open(event["text"]?.string ?? "", keys: Set((event["keys"]?.array ?? []).compactMap(\.string)),
-                            editor: Self.setting(ProcessInfo.processInfo.environment["UDECK_SETTING_EDITOR"]) ?? "system")
+                            editor: settings.string("editor", "system"))
+        case "settings":
+            // Changed in Settings while Agents runs (uDeck 0.9.32).
+            settingsTold = event["settings"]
+            updateKeepAwake()
+        case "preview":
+            // Settings shows a group of them with what it does beside it.
+            if let group = event["id"]?.string, let card = AgentsPreview.card(group, self) {
+                send(["preview": ["group": .string(group), "card": card]])
+            }
+            return
         case "submit":
             let text = event["text"]?.string ?? ""
             let files = (event["files"]?.array ?? []).compactMap(\.string)
@@ -444,6 +463,7 @@ public final class AgentsApp {
     private func press(_ id: String) {
         defer { withdrawAnswered() }
         if id == "stop" { selected?.current.interrupt(); return }
+        if id.hasPrefix("ctx:") { pressContext(id); return }
         if id == "unsent:send" { selected?.sendUnsent(); return }
         if id == "waiting:now" { selected?.current.sendNow(); return }
         if id == "unsent:field" { selected?.putUnsentIntoField(); return }
@@ -605,7 +625,10 @@ public final class AgentsApp {
                 actions.append(action("deny:" + ask.requestID, t("Отклонить", "Deny")))
                 asked(t("Хочет запустить: ", "Wants to run: ") + ask.summary, actions: actions)
             }
-            session.onTurnFinished = { words in finished(words) }
+            session.onTurnFinished = { [weak self] words in
+                finished(words)
+                self?.compactInThePause(conversation)
+            }
             session.onRateLimit = { [weak self, weak session] limit in
                 guard let self, let session else { return }
                 limits[session.account.name, default: AccountLimits()].note(limit, at: Date())

@@ -119,6 +119,9 @@ public struct ClaudeAssistantMessage: Sendable, Equatable {
     /// `<synthetic>` with the command's name here (`/cost` → `usage`,
     /// claude 2.1.332, measured 11-27).
     public let localCommand: String?
+    /// What the call it came from was given and gave: the prompt's size is
+    /// how full the context is, live (claude 2.1.332, measured 11-27).
+    public let usage: ClaudeCallUsage?
 
     init(_ raw: JSONValue) {
         let message = raw["message"] ?? .null
@@ -127,6 +130,7 @@ public struct ClaudeAssistantMessage: Sendable, Equatable {
         parentToolUseID = raw["parent_tool_use_id"]?.string
         sessionID = raw["session_id"]?.string ?? ""
         localCommand = raw["local_command_run"]?["command"]?.string
+        usage = message["usage"].flatMap(ClaudeCallUsage.init)
         blocks = (message["content"]?.array ?? []).map { block in
             switch block["type"]?.string ?? "" {
             case "text": .text(block["text"]?.string ?? "")
@@ -219,6 +223,9 @@ public struct ClaudeTurnResult: Sendable, Equatable {
     public let result: String
     public let costUSD: Double?
     public let sessionID: String
+    /// The turn's time, and the part of it the model worked (ms).
+    public let durationMs: Int?
+    public let apiMs: Int?
 
     init(_ raw: JSONValue) {
         isError = raw["is_error"]?.bool ?? false
@@ -227,6 +234,45 @@ public struct ClaudeTurnResult: Sendable, Equatable {
         result = raw["result"]?.string ?? ""
         costUSD = raw["total_cost_usd"]?.number
         sessionID = raw["session_id"]?.string ?? ""
+        durationMs = raw["duration_ms"]?.int
+        apiMs = raw["duration_api_ms"]?.int
+    }
+}
+
+/// One call's tokens, from an assistant message's `usage`.
+public struct ClaudeCallUsage: Sendable, Equatable {
+    public let input: Int
+    public let cacheRead: Int
+    public let cacheWritten: Int
+    public let output: Int
+    /// How long what the call wrote to the cache stays there: an hour, five
+    /// minutes, or nil when it wrote nothing (measured 11-27: an hour).
+    public let cacheLife: TimeInterval?
+
+    /// The prompt the call was given: how full the context is.
+    public var prompt: Int { input + cacheRead + cacheWritten }
+
+    init?(_ raw: JSONValue) {
+        guard let input = raw["input_tokens"]?.int else { return nil }
+        self.input = input
+        cacheRead = raw["cache_read_input_tokens"]?.int ?? 0
+        cacheWritten = raw["cache_creation_input_tokens"]?.int ?? 0
+        output = raw["output_tokens"]?.int ?? 0
+        if (raw["cache_creation"]?["ephemeral_1h_input_tokens"]?.int ?? 0) > 0 {
+            cacheLife = 3600
+        } else if (raw["cache_creation"]?["ephemeral_5m_input_tokens"]?.int ?? 0) > 0 {
+            cacheLife = 300
+        } else {
+            cacheLife = nil
+        }
+    }
+
+    public init(input: Int, cacheRead: Int = 0, cacheWritten: Int = 0, output: Int = 0, cacheLife: TimeInterval? = 3600) {
+        self.input = input
+        self.cacheRead = cacheRead
+        self.cacheWritten = cacheWritten
+        self.output = output
+        self.cacheLife = cacheLife
     }
 }
 
@@ -411,12 +457,41 @@ public struct ClaudeContextUsage: Sendable, Equatable {
     public let window: Int
     public let percent: Double
     public let model: String
+    /// What it is made of, as `/context` says: the categories in use and the
+    /// buffer kept for compaction — not those loaded only when asked for
+    /// (`deferred`), nor the free space.
+    public let parts: [Part]
+    /// Where the CLI compacts by itself, in tokens, when it does.
+    public let compactsAt: Int?
+
+    public struct Part: Sendable, Equatable {
+        public let id: String
+        public let name: String
+        public let tokens: Int
+        public let isBuffer: Bool
+    }
 
     public init(_ body: JSONValue) {
         tokens = body["totalTokens"]?.int ?? 0
         window = body["maxTokens"]?.int ?? 0
         percent = body["percentage"]?.number ?? (window > 0 ? Double(tokens) / Double(window) * 100 : 0)
         model = body["model"]?.string ?? ""
+        parts = (body["categories"]?.array ?? []).compactMap { category in
+            let kind = category["kind"]?.string ?? "used"
+            guard kind == "used" || kind == "buffer", let tokens = category["tokens"]?.int, tokens > 0 else { return nil }
+            return Part(id: category["id"]?.string ?? "", name: category["name"]?.string ?? "", tokens: tokens,
+                        isBuffer: kind == "buffer")
+        }
+        compactsAt = body["isAutoCompactEnabled"]?.bool == false ? nil : body["autoCompactThreshold"]?.int
+    }
+
+    public init(tokens: Int, window: Int, model: String = "", parts: [Part] = [], compactsAt: Int? = nil) {
+        self.tokens = tokens
+        self.window = window
+        percent = window > 0 ? Double(tokens) / Double(window) * 100 : 0
+        self.model = model
+        self.parts = parts
+        self.compactsAt = compactsAt
     }
 }
 

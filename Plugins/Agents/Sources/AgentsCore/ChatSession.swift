@@ -112,6 +112,12 @@ public final class ChatSession: Identifiable {
     public internal(set) var effort: String?
     /// How full the context is, after the last turn.
     public private(set) var context: ClaudeContextUsage?
+    /// How the context goes: live, its line, what took the most, the cache,
+    /// the compactions (`ContextTrack`).
+    public private(set) var contextTrack = ContextTrack()
+
+    /// How full the context is now: after the last call, else as last asked.
+    public var contextTokens: Int? { contextTrack.tokens ?? context?.tokens }
     /// When the running turn began, while one runs.
     public private(set) var turnStartedAt: Date?
     /// What it does now, while a turn runs.
@@ -347,7 +353,10 @@ public final class ChatSession: Identifiable {
             guard let answer = try? await connection.request({ ClaudeOutbound.contextUsage(id: $0) }, timeout: .seconds(20)),
                   answer.succeeded else { return }
             let usage = ClaudeContextUsage(answer.body)
-            if usage.window > 0 { context = usage }
+            if usage.window > 0 {
+                context = usage
+                contextTrack.measured(usage.tokens, at: Date())
+            }
         }
     }
 
@@ -557,6 +566,9 @@ public final class ChatSession: Identifiable {
                 if compactedInTurn { return }
                 commandAnswered = true
             }
+            if let usage = message.usage, message.localCommand == nil, usage.prompt > 0 {
+                contextTrack.call(usage, at: Date())
+            }
             for block in message.blocks {
                 switch block {
                 case .text(let text):
@@ -564,8 +576,9 @@ public final class ChatSession: Identifiable {
                 case .toolUse(let id, let name, let input):
                     finishStreaming(with: nil)
                     activity = .tool(name)
-                    items.append(.tool(id: id, name: name, summary: ToolSummary.of(name: name, input: input),
-                                       result: nil))
+                    let summary = ToolSummary.of(name: name, input: input)
+                    items.append(.tool(id: id, name: name, summary: summary, result: nil))
+                    contextTrack.tool(id: "tool-" + id, label: summary.isEmpty ? name : name + " " + summary)
                 case .thinking, .other:
                     continue
                 }
@@ -590,7 +603,14 @@ public final class ChatSession: Identifiable {
                 beginTurnClock()
             }
             inTurn = true
-        case .toolResults(let results, _):
+        case .toolResults(let results, let raw):
+            // What the CLI put in place of a compacted conversation: kept, to
+            // be read where the feed marks the compaction.
+            if results.isEmpty, raw["isSynthetic"]?.bool == true,
+               let text = raw["message"]?["content"]?.string ?? raw["message"]?["content"]?[0]?["text"]?.string,
+               SessionHistory.spoken(text) == .compacted {
+                contextTrack.summary(text)
+            }
             if !results.isEmpty, state == .working { activity = .requesting }
             for result in results {
                 // A tool's result answers the ask about it, whoever answered.
@@ -644,6 +664,7 @@ public final class ChatSession: Identifiable {
                 state = .idle
                 turnStartedAt = nil
                 activity = nil
+                contextTrack.turnEnded(at: Date(), costUSD: result.costUSD, durationMs: result.durationMs, apiMs: result.apiMs)
                 refreshContext()
                 refreshUsage()
                 if limit {
@@ -686,7 +707,8 @@ public final class ChatSession: Identifiable {
             // after the next turn (the operator, 11-27: «79%» after /compact).
             compactedInTurn = true
             if raw["compact_metadata"]?["trigger"]?.string == "manual" { commandAnswered = true }
-            items.append(.note(id: UUID(), text: "compacted"))
+            contextTrack.compacted(at: Date(), from: raw["compact_metadata"]?["pre_tokens"]?.int)
+            items.append(.note(id: UUID(), text: "compacted:\(contextTrack.compactions.count - 1)"))
             if state == .working { activity = .requesting }
             refreshContext()
         case .system("api_retry", let raw) where state == .working:

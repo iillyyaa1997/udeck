@@ -3,7 +3,7 @@
   "name": "Agents",
   "version": "0.1.0",
   "api": 1,
-  "minUDeck": "0.9.27",
+  "minUDeck": "0.9.32",
   "kind": "resident",
   "description": "Sessions of AI agents on a card: start one in a folder, see it work, answer its questions and permissions, continue any saved one. Runs your own Claude Code and Codex, and moves a conversation between them.",
   "author": "uDeck",
@@ -22,6 +22,17 @@
     "minWidth": 3,
     "minHeight": 2
   },
+  "settingGroups": [
+    {
+      "id": "context",
+      "label": "Context",
+      "preview": true
+    },
+    {
+      "id": "sleep",
+      "label": "Mac's sleep"
+    }
+  ],
   "settings": [
     {
       "key": "claude",
@@ -65,7 +76,8 @@
       "type": "bool",
       "default": true,
       "label": "Keep the Mac awake while an agent works",
-      "help": "The display still sleeps; a closed lid sleeps the Mac anyway."
+      "help": "The display still sleeps; a closed lid sleeps the Mac anyway.",
+      "group": "sleep"
     },
     {
       "key": "name_chats",
@@ -100,6 +112,206 @@
         {
           "value": "zed",
           "label": "Zed"
+        }
+      ]
+    },
+    {
+      "key": "ctx_badge",
+      "type": "enum",
+      "default": "tokens",
+      "label": "Shown as",
+      "group": "context",
+      "section": "The badge",
+      "options": [
+        {
+          "value": "percent",
+          "label": "25%"
+        },
+        {
+          "value": "tokens",
+          "label": "25% · 249k / 1M"
+        },
+        {
+          "value": "pie",
+          "label": "◔ 25%"
+        },
+        {
+          "value": "strip",
+          "label": "A strip under the line"
+        },
+        {
+          "value": "none",
+          "label": "Not shown"
+        }
+      ]
+    },
+    {
+      "key": "ctx_tone",
+      "type": "bool",
+      "default": true,
+      "label": "Coloured as it fills — yellow from 75%, red from 90%",
+      "group": "context"
+    },
+    {
+      "key": "ctx_details",
+      "type": "enum",
+      "default": "click",
+      "label": "Where",
+      "group": "context",
+      "section": "Details",
+      "options": [
+        {
+          "value": "click",
+          "label": "On a click"
+        },
+        {
+          "value": "line",
+          "label": "Always, in a line"
+        },
+        {
+          "value": "off",
+          "label": "Nowhere"
+        }
+      ]
+    },
+    {
+      "key": "ctx_parts",
+      "type": "bool",
+      "default": true,
+      "label": "What it is made of",
+      "group": "context"
+    },
+    {
+      "key": "ctx_graph",
+      "type": "bool",
+      "default": true,
+      "label": "How it grew",
+      "group": "context"
+    },
+    {
+      "key": "ctx_turns",
+      "type": "bool",
+      "default": true,
+      "label": "Turns left",
+      "group": "context"
+    },
+    {
+      "key": "ctx_heavy",
+      "type": "bool",
+      "default": true,
+      "label": "What takes the most",
+      "group": "context"
+    },
+    {
+      "key": "ctx_cache",
+      "type": "bool",
+      "default": true,
+      "label": "The warm cache",
+      "group": "context"
+    },
+    {
+      "key": "ctx_week",
+      "type": "bool",
+      "default": true,
+      "label": "Share of the week",
+      "group": "context"
+    },
+    {
+      "key": "ctx_cost",
+      "type": "bool",
+      "default": true,
+      "label": "Cost and time",
+      "group": "context"
+    },
+    {
+      "key": "ctx_model",
+      "type": "bool",
+      "default": true,
+      "label": "Model and effort",
+      "group": "context"
+    },
+    {
+      "key": "ctx_account",
+      "type": "bool",
+      "default": true,
+      "label": "Account and its limit",
+      "group": "context"
+    },
+    {
+      "key": "ctx_auto",
+      "type": "bool",
+      "default": true,
+      "label": "When it compacts",
+      "group": "context"
+    },
+    {
+      "key": "ctx_btn_compact",
+      "type": "bool",
+      "default": true,
+      "label": "Compact now",
+      "group": "context",
+      "section": "Buttons"
+    },
+    {
+      "key": "ctx_btn_hint",
+      "type": "bool",
+      "default": true,
+      "label": "Compact with a hint…",
+      "group": "context"
+    },
+    {
+      "key": "ctx_btn_fresh",
+      "type": "bool",
+      "default": true,
+      "label": "New chat with a summary",
+      "group": "context"
+    },
+    {
+      "key": "ctx_pause",
+      "type": "bool",
+      "default": true,
+      "label": "Compact in the pause after a turn, not in the middle of one",
+      "group": "context",
+      "section": "Compaction"
+    },
+    {
+      "key": "ctx_pause_at",
+      "type": "int",
+      "default": 70,
+      "min": 40,
+      "max": 95,
+      "label": "…when fuller than, %",
+      "group": "context"
+    },
+    {
+      "key": "ctx_mark",
+      "type": "bool",
+      "default": true,
+      "label": "Mark a compaction in the feed, with its summary",
+      "group": "context"
+    },
+    {
+      "key": "sleep_show",
+      "type": "enum",
+      "default": "icon",
+      "label": "While an agent keeps the Mac awake",
+      "group": "sleep",
+      "options": [
+        {
+          "value": "icon",
+          "label": "☕ in the card's line, the rest on a click"
+        },
+        {
+          "value": "one",
+          "label": "One line"
+        },
+        {
+          "value": "two",
+          "label": "Two lines"
+        },
+        {
+          "value": "none",
+          "label": "Not shown"
         }
       ]
     }

@@ -6,9 +6,7 @@ import UDeckAgents
 extension AgentsApp {
     /// Setting `keep_awake`, a bool: on unless switched off.
     var keepAwakeEnabled: Bool {
-        let raw = ProcessInfo.processInfo.environment["UDECK_SETTING_KEEP_AWAKE"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return raw != "false" && raw != "0"
+        settings.bool("keep_awake", true)
     }
 
     /// The sessions in a turn and not waiting for the person.
@@ -61,8 +59,24 @@ extension AgentsApp {
 
     /// The card's line while the Mac is held: how many work, who else holds
     /// it, and that a lid closes it anyway.
+    /// ☕ in the card's line, what it means on a click — the operator's
+    /// choice over two lines that came and went (11-28; setting `sleep_show`).
+    func keepAwakeBadge() -> JSONValue? {
+        guard keepAwake.holding, settings.sleepShown == "icon" else { return nil }
+        return ["text": "☕", "details": .array(keepAwakeLines(split: true))]
+    }
+
     func keepAwakeRows() -> [JSONValue] {
         guard keepAwake.holding else { return [] }
+        switch settings.sleepShown {
+        case "two": return keepAwakeLines(split: true)
+        case "one": return keepAwakeLines(split: false)
+        default: return []
+        }
+    }
+
+    /// What keeps the Mac awake: one line, or the session's and the rest.
+    private func keepAwakeLines(split: Bool) -> [JSONValue] {
         let count = keepAwake.working
         let line = t("☕ Мак не уснёт, пока \(count == 1 ? "работает" : "работают") \(count) \(Self.sessions(count))",
                      "☕ The Mac stays awake while \(count) session\(count == 1 ? "" : "s") work\(count == 1 ? "s" : "")")
@@ -72,7 +86,10 @@ extension AgentsApp {
             more.append(t("Ещё не дают спать: ", "Also keeping it awake: ") + keepAwake.others.joined(separator: ", "))
         }
         if keepAwake.hasALid { more.append(t("Закроешь крышку — уснёт всё равно", "Close the lid and it sleeps anyway")) }
-        if !more.isEmpty { rows.append(["text": .string(more.joined(separator: " · "))]) }
+        guard !more.isEmpty else { return rows }
+        if split { rows.append(["text": .string(more.joined(separator: " · "))]) } else {
+            rows = [["text": .string(([line] + more).joined(separator: " · "))]]
+        }
         return rows
     }
 

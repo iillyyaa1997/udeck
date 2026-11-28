@@ -164,14 +164,15 @@ enum AgentsCard {
                 })],
             ]
         }
-        var rows: [JSONValue] = compact(app) ? [] : [status(session, app)] + app.keepAwakeRows()
+        var rows: [JSONValue] = compact(app) ? [] : [status(session, app)] + contextRows(session, app) + app.keepAwakeRows()
         // The card is sent whole on every change, five times a second while
         // words stream in, and uDeck lays all of it out: the newest entries
         // only, and no entry longer than a screenful.
         let keep = app.size.rows <= 4 ? 30 : 60
         rows.append(["feed": .array(session.feed.suffix(keep).map {
             feedEntry($0.item, app, label: $0.label, files: $0.item.uuid.flatMap { session.files(of: $0) },
-                      folder: session.folder)
+                      folder: session.folder, track: session.claude?.contextTrack,
+                      window: session.claude?.context?.window)
         })])
         let held = app.heldBack[session.id] != nil
         if held { rows.append(["ask": heldRow(session, app)]) }
@@ -330,14 +331,20 @@ enum AgentsCard {
         ]]
     }
 
+    /// The context's strip, or its details in a line, under the card's line.
+    static func contextRows(_ session: Conversation, _ app: AgentsApp) -> [JSONValue] {
+        guard let facts = ContextCard.facts(session, app) else { return [] }
+        return ContextCard.rows(facts, app.settings.context, app)
+    }
+
     /// What the session is doing, how full its context is, and where it works.
     static func status(_ session: Conversation, _ app: AgentsApp) -> JSONValue {
         var items: [JSONValue] = [["badge": stateBadge(session, app)]]
-        if let percent = session.current.contextPercent {
-            let tone = percent >= 90 ? "crit" : percent >= 75 ? "warn" : "info"
-            items.append(["badge": ["text": .string(app.t("контекст \(Int(percent.rounded()))%", "context \(Int(percent.rounded()))%")),
-                                    "tone": .string(tone), "fill": .number(percent / 100)]])
+        // As the operator built it (11-28), each part a setting.
+        if let facts = ContextCard.facts(session, app), let badge = ContextCard.badge(facts, app.settings.context, app) {
+            items.append(["badge": badge])
         }
+        if let cup = app.keepAwakeBadge() { items.append(["badge": cup]) }
         if case .codex(let codex) = session.current, let limits = codex.rateLimits, let badge = codexLimits(limits, app) {
             items.append(["badge": badge])
         }
@@ -668,7 +675,7 @@ enum AgentsCard {
     }
 
     static func feedEntry(_ item: FeedItem, _ app: AgentsApp, label: String? = nil, files: [String]? = nil,
-                          folder: URL? = nil) -> JSONValue {
+                          folder: URL? = nil, track: ContextTrack? = nil, window: Int? = nil) -> JSONValue {
         switch item {
         case .user(let id, let text):
             var entry: [String: JSONValue] = ["id": .string(id.uuidString), "role": "user", "text": .string(clipped(text))]
@@ -700,6 +707,22 @@ enum AgentsCard {
             }
             return .object(entry)
         case .note(let id, let text):
+            // A compaction marked as the operator chose (11-28): how full the
+            // context was and is, and what the CLI left in its place — folded,
+            // like a tool's output.
+            if text.hasPrefix("compacted:"), app.settings.context.mark, let track,
+               let index = Int(text.dropFirst("compacted:".count)), track.compactions.indices.contains(index) {
+                let compaction = track.compactions[index]
+                var said = ""
+                if let window, window > 0, let from = compaction.fromTokens {
+                    said = "\(ContextCard.pct(from, window))% → " + (compaction.toTokens.map { "\(ContextCard.pct($0, window))%" } ?? "…")
+                }
+                var entry: [String: JSONValue] = ["id": .string(id.uuidString), "role": "tool",
+                                                  "name": .string(app.t("Контекст сжат", "Context compacted")),
+                                                  "text": .string(app.t("Контекст сжат", "Context compacted") + (said.isEmpty ? "" : "  " + said))]
+                if let summary = compaction.summary { entry["detail"] = .string(clipped(summary, 12_000)) }
+                return .object(entry)
+            }
             return ["id": .string(id.uuidString), "role": "note", "text": .string(noteText(text, app))]
         }
     }
@@ -770,7 +793,17 @@ enum AgentsCard {
             return app.t("Чтобы сменить усилие, напиши /effort и уровень — или выбери в меню усилия",
                          "To change the effort, write /effort and a level — or pick it in the effort menu")
         }
-        if text == "compacted" { return app.t("Здесь контекст был сжат", "The context was compacted here") }
+        if text == "compacted" || text.hasPrefix("compacted:") { return app.t("Здесь контекст был сжат", "The context was compacted here") }
+        if text.hasPrefix("pause-compact:") {
+            let percent = text.dropFirst("pause-compact:".count)
+            return app.t("Контекст заполнен на \(percent)% — сжимаю сейчас, в паузе, а не посреди работы",
+                         "The context is \(percent)% full — compacting now, in the pause, not mid-turn")
+        }
+        if text.hasPrefix("carried:") {
+            let tokens = ContextCard.tokens(Int(text.dropFirst("carried:".count)) ?? 0)
+            return app.t("Новый разговор: итог прошлого (~\(tokens) токенов) уйдёт вместе с первым сообщением",
+                         "A new chat: the last one's summary (~\(tokens) tokens) goes with the first message")
+        }
         if text.hasPrefix("model:") { return app.t("Модель: ", "Model: ") + model(String(text.dropFirst(6))) }
         if text.hasPrefix("model-failed:") {
             return app.t("Не удалось сменить модель на ", "Could not switch the model to ") + model(String(text.dropFirst(13)))

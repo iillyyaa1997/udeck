@@ -16,9 +16,7 @@ extension AgentsApp {
     /// Whether a model makes up names (setting `name_chats`, on until
     /// switched off).
     var nameChatsEnabled: Bool {
-        let raw = ProcessInfo.processInfo.environment["UDECK_SETTING_NAME_CHATS"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return raw != "false" && raw != "0"
+        settings.bool("name_chats", true)
     }
 
     /// What the model is told; the folder and the conversation's start are

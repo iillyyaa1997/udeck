@@ -245,8 +245,16 @@ def control_answer(message):
             {"value": "quick", "displayName": "Quick 1.0", "resolvedModel": "claude-quick-1-0",
              "supportedEffortLevels": ["low", "medium", "high"]}]}
     elif subtype == "get_context_usage":
-        body = ({"totalTokens": 4000, "maxTokens": 200000, "percentage": 2, "model": "claude-fake-1-0"} if COMPACTED
-                else {"totalTokens": 28000, "maxTokens": 200000, "percentage": 14, "model": "claude-fake-1-0"})
+        full = int(os.environ.get("FAKE_CLAUDE_CONTEXT", "28000"))
+        used = 4000 if COMPACTED else full
+        body = {"totalTokens": used, "maxTokens": 200000, "percentage": used * 100 // 200000, "model": "claude-fake-1-0",
+                "autoCompactThreshold": 193000, "isAutoCompactEnabled": True,
+                "categories": [{"id": "system_prompt", "name": "System prompt", "tokens": 3000, "kind": "used"},
+                               {"id": "skills", "name": "Skills", "tokens": 1000, "kind": "used"},
+                               {"id": "messages", "name": "Messages", "tokens": max(0, used - 4000), "kind": "used"},
+                               {"id": "mcp_tools_deferred", "name": "MCP tools (deferred)", "tokens": 9000, "kind": "deferred"},
+                               {"id": "autocompact_buffer", "name": "Autocompact buffer", "tokens": 7000, "kind": "buffer"},
+                               {"id": "free_space", "name": "Free space", "tokens": 100000, "kind": "free"}]}
     elif subtype == "get_usage":
         body = {"subscription_type": "max", "rate_limits": usage()}
     elif subtype == "interrupt":

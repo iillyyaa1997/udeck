@@ -399,6 +399,18 @@ public final class Conversation: Identifiable {
         fill = ("unsent-" + UUID().uuidString, texts.joined(separator: "\n"))
     }
 
+    /// `text` goes to the agent with the next message, before it — a new
+    /// conversation carrying another's summary (the operator's «Новый
+    /// разговор с итогом», 11-28).
+    public func carry(_ text: String) {
+        preamble[active] = text
+    }
+
+    /// What was said and done in the conversation, for another to carry.
+    public var recap: String {
+        Self.gap(since: nil, in: segments, agents: agents).text
+    }
+
     /// The handoff note's text, for the card to put in words.
     static func noteText(_ handoff: Handoff) -> String {
         "handoff:\(handoff.to.rawValue)|\(handoff.model)|\(handoff.messages)|\(handoff.actions)|\(handoff.tokens)"

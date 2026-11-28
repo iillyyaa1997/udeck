@@ -9,12 +9,37 @@ public struct AccountLimits: Sendable, Equatable {
     /// The account stopped a turn at its limit; until then nothing more runs on it.
     public var limitedUntil: Date?
     public var seenAt: Date
+    /// The week's use as it was seen, the newest last, for a day back: how
+    /// fast it goes (the operator's builder, 11-28: «доля недели»).
+    public private(set) var weekSeen: [WeekSeen] = []
+
+    public struct WeekSeen: Sendable, Equatable {
+        public let at: Date
+        public let used: Double
+    }
 
     public init(fiveHour: UsageWindow? = nil, week: UsageWindow? = nil, limitedUntil: Date? = nil, seenAt: Date = Date()) {
         self.fiveHour = fiveHour
         self.week = week
         self.limitedUntil = limitedUntil
         self.seenAt = seenAt
+    }
+
+    mutating func noteWeek(_ used: Double, at now: Date) {
+        if let last = weekSeen.last, now.timeIntervalSince(last.at) < 120, last.used == used { return }
+        weekSeen.append(WeekSeen(at: now, used: used))
+        weekSeen.removeAll { now.timeIntervalSince($0.at) > 86_400 }
+        if weekSeen.count > 200 { weekSeen.removeFirst(weekSeen.count - 200) }
+    }
+
+    /// How much of the week went in the last hour, as a share 0…1: from the
+    /// oldest sight within the hour and a half to the newest; nil with less
+    /// than ten minutes between them.
+    public func weekPerHour(now: Date = Date()) -> Double? {
+        guard let newest = weekSeen.last,
+              let oldest = weekSeen.first(where: { now.timeIntervalSince($0.at) <= 5400 }),
+              newest.at.timeIntervalSince(oldest.at) >= 600 else { return nil }
+        return max(0, newest.used - oldest.used) / (newest.at.timeIntervalSince(oldest.at) / 3600)
     }
 
     /// Whether the account is at its limit now.
@@ -27,7 +52,10 @@ public struct AccountLimits: Sendable, Equatable {
     /// and a limit it no longer shows is over.
     mutating func note(_ usage: ClaudeUsage, at now: Date) {
         if let window = usage.fiveHour { fiveHour = window }
-        if let window = usage.sevenDay { week = window }
+        if let window = usage.sevenDay {
+            week = window
+            noteWeek(window.used, at: now)
+        }
         seenAt = now
         if let limitedUntil, limitedUntil <= now { self.limitedUntil = nil }
         if [fiveHour, week].compactMap({ $0 }).allSatisfy({ $0.used < 0.999 }), usage.fiveHour != nil || usage.sevenDay != nil {
@@ -42,7 +70,10 @@ public struct AccountLimits: Sendable, Equatable {
             fiveHour = limit.usage
         } else if limit.window.hasPrefix("seven_day") {
             // A model's own week counts when it is the fuller one.
-            if week == nil || limit.usage.used >= (week?.used ?? 0) { week = limit.usage }
+            if week == nil || limit.usage.used >= (week?.used ?? 0) {
+                week = limit.usage
+                noteWeek(limit.usage.used, at: now)
+            }
         }
         seenAt = now
         if limit.status == "rejected" {
