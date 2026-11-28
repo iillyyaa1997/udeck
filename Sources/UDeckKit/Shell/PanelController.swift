@@ -80,6 +80,10 @@ public final class PanelController {
     /// change can restate it in the new window's coordinates before anything
     /// animates.
     private var lastAppliedPhase: PanelPhase = .collapsed
+    /// The last of `.open` and `.fullscreen` the panel was in: the size the
+    /// workspace is kept laid out at while the panel is away
+    /// (`ShellState.workspaceSize`).
+    private var workspacePhase: PanelPhase = .open
 
 
     /// Identifies the most recent transition, so a settle scheduled for one is
@@ -220,6 +224,12 @@ public final class PanelController {
         panel = DeckPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200))
         let hosting = PanelHostingView(rootView: content(shell))
         hosting.autoresizingMask = [.width, .height]
+        // The controller sets the window's frame itself. Left to its default,
+        // the hosting view also worked out the window's smallest and largest
+        // size from the content on every update and set the frame for it —
+        // a tenth of the main thread's work while the panel opened, in a
+        // sample of eight reveals in the lab (11-28).
+        hosting.sizingOptions = []
         panel.contentView = hosting
 
         shell.onInteract = { [weak self] in self?.noteInteraction() }
@@ -1096,6 +1106,8 @@ public final class PanelController {
         // and away from AppKit, because deciding it in here is what put four
         // faults in front of the operator. See `PanelTransition`.
         let phase = state.phase
+        if phase == .open || phase == .fullscreen { workspacePhase = phase }
+        shell.workspaceSize = geometry.frame(for: workspacePhase).size
         let plan = PanelTransition.plan(
             from: lastAppliedPhase,
             to: phase,
