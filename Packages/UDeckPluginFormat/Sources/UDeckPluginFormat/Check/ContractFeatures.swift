@@ -6,6 +6,8 @@ public enum ContractFeature: Hashable, Sendable, CustomStringConvertible {
     case permission(String)
     case windowField(String)
     case settingField(String)
+    /// A field of an entry of `settingGroups` (0.9.32).
+    case settingGroupField(String)
     case settingType(String)
     case optionField(String)
     /// `manifest.<lang>.json` beside the manifest.
@@ -36,6 +38,7 @@ public enum ContractFeature: Hashable, Sendable, CustomStringConvertible {
         case .permission(let name): "the permission \"\(name)\""
         case .windowField(let name): "the field \"window.\(name)\""
         case .settingField(let name): "the setting field \"\(name)\""
+        case .settingGroupField(let name): "the setting group field \"\(name)\""
         case .settingType(let type): "the setting type \"\(type)\""
         case .optionField(let name): "the option field \"\(name)\""
         case .translations: "translations (manifest.<lang>.json)"
@@ -237,6 +240,14 @@ public enum ContractFeatures {
         add(suggestRelease, SuggestItem.CodingKeys.allCases.map { .rowField(row: "input.suggest.items", field: $0.stringValue) })
         add(suggestRelease, SuggestFound.CodingKeys.allCases.map { .rowField(row: "input.suggest.found", field: $0.stringValue) })
 
+        // Settings in groups, each a tab, with a card the plugin draws beside
+        // them: 0.9.32 (the `settings` and `preview` events, and the
+        // `preview` it answers with, are the docs').
+        add(.next, [.manifestField("settingGroups"), .translationField("settingGroups")])
+        add(.next, ["group", "section"].map { .settingField($0) })
+        add(.next, [.settingTranslationField("section")])
+        add(.next, SettingGroup.CodingKeys.allCases.map { .settingGroupField($0.stringValue) })
+
         let fillRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 19))
         add(fillRelease, [.rowField(row: "input", field: "fill")])
         add(fillRelease, ["id", "text"].map { .rowField(row: "input.fill", field: $0) })
@@ -268,6 +279,9 @@ public enum ContractFeatures {
         if let kind = manifest.last("kind")?.string { used.insert(.pluginKind(kind)) }
         for field in present(manifest.last("permissions")?.object) { used.insert(.permission(field)) }
         for field in present(manifest.last("window")?.object) { used.insert(.windowField(field)) }
+        for group in manifest.last("settingGroups")?.array ?? [] {
+            for field in present(group.object) { used.insert(.settingGroupField(field)) }
+        }
         for setting in manifest.last("settings")?.array ?? [] {
             let object = setting.object
             for field in present(object) { used.insert(.settingField(field)) }

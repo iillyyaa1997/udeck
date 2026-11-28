@@ -16,6 +16,12 @@ public final class DeckModel {
     public internal(set) var layout: DeckLayout
     public private(set) var plugins: [DiscoveredPlugin] = []
     public internal(set) var snapshots: [String: PluginSnapshot] = [:]
+    /// The cards plugins drew for their settings groups — `plugin/group` —
+    /// to show beside them in Settings (`ResidentMessage.preview`, 0.9.32).
+    public internal(set) var settingPreviews: [String: Card] = [:]
+    /// The settings group Settings shows with its preview now: asked again
+    /// after each change of a setting of that plugin.
+    @ObservationIgnored var previewShown: (plugin: PluginIdentifier, group: String)?
     /// The card a resident plugin printed for one of its places by name
     /// (`CardPlace.view`): what that window, or that place apart, shows
     /// instead of the plugin's card.
@@ -764,7 +770,14 @@ public final class DeckModel {
         residents.onMessage = { [weak self] id, message in self?.residentSaid(id, message) }
         residents.onLive = { [weak self] live in
             guard let self, live != liveResidents else { return }
+            let started = live.subtracting(liveResidents)
             liveResidents = live
+            // Started — again, after an update or a crash — while Settings
+            // shows a preview of it: asked for it, the plugin knowing nothing of
+            // the request before.
+            if let shown = previewShown, started.contains(shown.plugin) {
+                residents.send(.preview(group: shown.group), to: shown.plugin)
+            }
         }
         residents.language = { [weak self] in self?.strings.language.rawValue ?? "en" }
         let placed = placedPluginIDs
@@ -835,6 +848,11 @@ public final class DeckModel {
             guard let uuid = UUID(uuidString: view), let found = layout.window(withID: uuid),
                   found.window.pluginID == id else { return }
             bringForward(found.window, tabID: found.tabID)
+        case .preview(let group, let card):
+            // Only for a group the plugin declared with a preview.
+            guard plugin(withID: id)?.manifest?.settingGroups.contains(where: { $0.id == group && $0.hasPreview }) == true
+            else { return }
+            settingPreviews[id.rawValue + "/" + group] = card
         case .unknown(let line):
             DeckLog.plugins.notice("resident \(id.rawValue, privacy: .public) said something uDeck does not know: \(line, privacy: .public)")
         }
@@ -1091,6 +1109,36 @@ public final class DeckModel {
         pluginSettings.set(value, for: key, plugin: id)
         savePluginSettings()
         refresh(id)
+        // A resident plugin is running and read its settings when it started:
+        // it is told them now, and a preview shown of them asked for again.
+        tellSettings(to: id)
+    }
+
+    /// Every setting of a running resident plugin, as it is now (`settings`),
+    /// and the preview Settings shows of it asked for again.
+    func tellSettings(to id: PluginIdentifier) {
+        guard liveResidents.contains(id), let manifest = plugin(withID: id)?.manifest, manifest.kind == .resident else { return }
+        var values: [String: SettingValue] = [:]
+        for declaration in manifest.settings { values[declaration.key] = pluginSettings.value(of: declaration, for: id) }
+        residents.send(.settings(values), to: id)
+        if let shown = previewShown, shown.plugin == id { residents.send(.preview(group: shown.group), to: id) }
+    }
+
+    /// Settings shows the group `group` of `id` — one with a preview — or,
+    /// with nil, no longer does. The plugin is asked for its card.
+    public func showSettingsPreview(_ id: PluginIdentifier, group: String?) {
+        guard let group else {
+            previewShown = nil
+            return
+        }
+        previewShown = (id, group)
+        guard liveResidents.contains(id) else { return }
+        residents.send(.preview(group: group), to: id)
+    }
+
+    /// The card `id` drew for its settings group `group`, if it has.
+    public func settingPreview(_ id: PluginIdentifier, group: String) -> Card? {
+        settingPreviews[id.rawValue + "/" + group]
     }
 
     /// Records the operator's answer to a plugin's request, in full.

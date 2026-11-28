@@ -329,6 +329,13 @@ What uDeck writes:
   what is typed: the row's `id`, the tab as `id`, the query as `text` (uDeck
   0.9.25 and later). Answer with the card, the items in `suggest.found`.
 * `closed` — a place of the card's own was closed (below).
+* `settings` — the person changed one of your settings while you run: every
+  setting as it is now, in `settings`, each value as JSON (uDeck 0.9.32 and
+  later). The environment you started with says them too; this is what
+  changes after.
+* `preview` — Settings shows a group of your settings that asks for a
+  preview: the group as `id`. Answer with `{"preview":{"group":…,"card":{…}}}`
+  — see [Settings in groups](#settings-in-groups-with-a-preview).
 
 #### Each thing in a place of its own
 
@@ -743,6 +750,40 @@ sees and must not be blank. A value the operator stored that no longer fits the
 declared range is brought back into it on read, so tightening `max` in a new
 version of your plugin does not break their settings.
 
+### Settings in groups, with a preview
+
+A plugin with many settings can put them in groups, each a tab of its own in
+Settings, and start a heading within a group (uDeck 0.9.32 and later):
+
+```json
+"settingGroups": [ { "id": "context", "label": "Context", "preview": true } ],
+"settings": [
+  { "key": "editor", "type": "string", "label": "Editor", "default": "" },
+  { "key": "badge", "type": "enum", "label": "Badge", "default": "tokens",
+    "group": "context", "section": "The badge",
+    "options": [ { "value": "percent", "label": "Percent" }, { "value": "tokens", "label": "Percent and tokens" } ] }
+]
+```
+
+A setting with no `group` is in the first tab, «General». `section` is said
+once, above the setting that has it, for it and the settings after it. A
+group's `id` is lowercase letters, digits and underscores; there are at most
+eight; a setting names one the manifest declares. A translation names them:
+`"settingGroups": { "context": { "label": "Контекст" } }`, and a setting's
+`section` beside its `label`.
+
+With `"preview": true`, a resident plugin draws what the group's settings do.
+While Settings shows the group, uDeck sends `{"event":"preview","id":"context"}`,
+and again after every change of a setting — right after the `settings` event
+that says it. Answer with a card, drawn beside the settings as on the deck,
+and not to be pressed: a sample.
+
+```json
+{"preview":{"group":"context","card":{"title":"Sample","rows":[ … ]}}}
+```
+
+A plugin that is not running shows no preview; Settings says so.
+
 ### How settings reach your plugin
 
 As environment variables, holding **JSON**:
@@ -756,6 +797,10 @@ UDECK_SETTING_VOLUMES="physical"
 JSON, not bare text, so a plugin can tell `false` from `"false"` and `12` from
 `"12"` without guessing. Read them defensively: a missing or unparseable
 variable should fall back to your declared default rather than crash.
+
+A resident plugin keeps running while the person changes them: it is told
+every setting again, in a `settings` event, after each change (uDeck 0.9.32
+and later).
 
 ### The rest of the environment
 

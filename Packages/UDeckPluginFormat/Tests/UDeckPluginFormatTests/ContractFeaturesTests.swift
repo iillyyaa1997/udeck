@@ -22,6 +22,7 @@ struct ContractFeaturesTests {
         features += SettingDeclaration.CodingKeys.allCases.map { .settingField($0.stringValue) }
         features += SettingDeclaration.Kind.allCases.map { .settingType($0.rawValue) }
         features += SettingOption.CodingKeys.allCases.map { .optionField($0.stringValue) }
+        features += SettingGroup.CodingKeys.allCases.map { .settingGroupField($0.stringValue) }
         features.append(.translations)
         features += ManifestTranslation.CodingKeys.allCases.map { .translationField($0.stringValue) }
         features += SettingTranslation.CodingKeys.allCases.map { .settingTranslationField($0.stringValue) }
@@ -136,8 +137,15 @@ struct ContractFeaturesTests {
         let inputFill: Set<ContractFeature> = [.rowField(row: "input", field: "fill"),
                                                .rowField(row: "input.fill", field: "id"),
                                                .rowField(row: "input.fill", field: "text")]
+        // Waiting for the next release: settings in groups, with a preview.
+        var groups: Set<ContractFeature> = [.manifestField("settingGroups"), .translationField("settingGroups"),
+                                            .settingField("group"), .settingField("section"),
+                                            .settingTranslationField("section")]
+        for field in ["id", "label", "preview"] { groups.insert(.settingGroupField(field)) }
         for (feature, release) in ContractFeatures.registry where feature != .manifestField("minUDeck") {
             switch feature {
+            case _ where groups.contains(feature):
+                #expect(release == .next, "\(feature)")
             case _ where suggest.contains(feature):
                 #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 25)), "\(feature)")
             case _ where liveBadge.contains(feature):
@@ -165,7 +173,8 @@ struct ContractFeaturesTests {
         let read = ContractRelease.released(SemanticVersion(major: 0, minor: 6, patch: 0))
         #expect(ContractFeatures.minimumUDeckReadFrom == read)
         #expect(ContractFeatures.release(of: .manifestField("minUDeck")) == Optional(read))
-        #expect(!ContractFeatures.registry.values.contains(.next), "nothing is waiting for a release")
+        #expect(ContractFeatures.registry.filter { $0.value == .next }.keys.allSatisfy(groups.contains),
+                "nothing else is waiting for a release")
         // The release after this one, which has no number yet: after every
         // released one, and met only by a uDeck after this one.
         let current = try #require(SemanticVersion(UDeckRelease.version))

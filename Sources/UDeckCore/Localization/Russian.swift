@@ -210,6 +210,9 @@ struct Russian: Vocabulary {
         case .catalogueUpdateAll(let count): "Обновить все (\(count))"
         case .catalogueUpdateAllLeft(let names): "Не обновлены — у каждого сначала предупреждение, на его строке: \(names)"
         case .pluginSettings: "Настройки"
+        case .pluginSettingsGeneral: "Общие"
+        case .pluginSettingsPreview: "Как это выглядит"
+        case .pluginSettingsPreviewWaits: "Плагин покажет, как это выглядит, когда запущен"
         case .pluginEverySeconds(let seconds): "каждые \(seconds) с"
         case .pluginLastFailure(let reason): "Последний сбой: \(self(.failureReason(reason)))"
         case .failureReason(let reason): Self.failure(reason, say: self)

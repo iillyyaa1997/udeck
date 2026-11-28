@@ -140,6 +140,8 @@ public struct PluginManifest: Codable, Equatable, Sendable {
 
     public var permissions: PermissionRequest
     public var settings: [SettingDeclaration]
+    /// The groups settings are shown in, each a tab (0.9.32).
+    public var settingGroups: [SettingGroup]
     public var window: WindowHints
 
     /// The lowest uDeck release that has everything this plugin uses inside its
@@ -156,7 +158,7 @@ public struct PluginManifest: Codable, Equatable, Sendable {
     /// else a typo (rule 12), and the release registry dates each of these.
     enum CodingKeys: String, CodingKey, CaseIterable {
         case id, name, version, api, kind, description, author, homepage
-        case run, interval, timeout, restart, permissions, settings, window, minUDeck
+        case run, interval, timeout, restart, permissions, settings, settingGroups, window, minUDeck
     }
 
     public init(
@@ -174,6 +176,7 @@ public struct PluginManifest: Codable, Equatable, Sendable {
         restart: RestartPolicy? = nil,
         permissions: PermissionRequest = PermissionRequest(),
         settings: [SettingDeclaration] = [],
+        settingGroups: [SettingGroup] = [],
         window: WindowHints = WindowHints(),
         minUDeck: String? = nil
     ) {
@@ -191,6 +194,7 @@ public struct PluginManifest: Codable, Equatable, Sendable {
         self.restart = restart
         self.permissions = permissions
         self.settings = settings
+        self.settingGroups = settingGroups
         self.window = window
         self.minUDeck = minUDeck
     }
@@ -212,6 +216,7 @@ public struct PluginManifest: Codable, Equatable, Sendable {
             restart: try c.decodeIfPresent(RestartPolicy.self, forKey: .restart),
             permissions: try c.decodeIfPresent(PermissionRequest.self, forKey: .permissions) ?? PermissionRequest(),
             settings: try c.decodeIfPresent([SettingDeclaration].self, forKey: .settings) ?? [],
+            settingGroups: try c.decodeIfPresent([SettingGroup].self, forKey: .settingGroups) ?? [],
             window: try c.decodeIfPresent(WindowHints.self, forKey: .window) ?? WindowHints(),
             minUDeck: Self.lenientText(c, .minUDeck)
         )
@@ -250,6 +255,7 @@ public enum ManifestProblem: Equatable, Sendable, CustomStringConvertible {
     case blankName
     case duplicateSettingKey(String)
     case invalidSettingDeclaration(key: String, reason: String)
+    case invalidSettingGroup(id: String, reason: String)
     case invalidWindowHints(reason: String)
 
     /// `minUDeck` names a release newer than the uDeck reading the manifest.
@@ -286,6 +292,8 @@ public enum ManifestProblem: Equatable, Sendable, CustomStringConvertible {
             "two settings share the key \"\(key)\""
         case .invalidSettingDeclaration(let key, let reason):
             "setting \"\(key)\": \(reason)"
+        case .invalidSettingGroup(let id, let reason):
+            "setting group \"\(id)\": \(reason)"
         case .invalidWindowHints(let reason):
             "\"window\": \(reason)"
         case .needsNewerUDeck(let required, let running):
@@ -373,6 +381,25 @@ extension PluginManifest {
             }
             if let reason = declaration.problem {
                 found.append(.invalidSettingDeclaration(key: declaration.key, reason: reason))
+            }
+        }
+
+        var groupIDs = Set<String>()
+        for group in settingGroups {
+            if let reason = group.problem {
+                found.append(.invalidSettingGroup(id: group.id, reason: reason))
+            } else if !groupIDs.insert(group.id).inserted {
+                found.append(.invalidSettingGroup(id: group.id, reason: "two groups share this id"))
+            }
+        }
+        if settingGroups.count > SettingGroup.limit {
+            found.append(.invalidSettingGroup(id: settingGroups[SettingGroup.limit].id,
+                                              reason: "more than \(SettingGroup.limit) groups"))
+        }
+        for declaration in settings {
+            if let group = declaration.group, !groupIDs.contains(group) {
+                found.append(.invalidSettingDeclaration(key: declaration.key,
+                                                        reason: "group \"\(group)\" is not one of settingGroups"))
             }
         }
 

@@ -201,6 +201,9 @@ struct English: Vocabulary {
         case .catalogueUpdateAll(let count): "Update all (\(count))"
         case .catalogueUpdateAllLeft(let names): "Not updated — each warns first, on its own row: \(names)"
         case .pluginSettings: "Settings"
+        case .pluginSettingsGeneral: "General"
+        case .pluginSettingsPreview: "How it looks"
+        case .pluginSettingsPreviewWaits: "The plugin shows how it looks while it is running"
         case .pluginEverySeconds(let seconds): "every \(seconds) s"
         case .pluginLastFailure(let reason): "Last failure: \(self(.failureReason(reason)))"
         case .failureReason(let reason):

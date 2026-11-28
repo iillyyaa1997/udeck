@@ -21,6 +21,8 @@ enum ManifestShape {
     static var restartFields: Set<String> { Set(RestartPolicy.CodingKeys.allCases.map(\.stringValue)) }
     static var settingFields: Set<String> { Set(SettingDeclaration.CodingKeys.allCases.map(\.stringValue)) }
     static var optionFields: Set<String> { Set(SettingOption.CodingKeys.allCases.map(\.stringValue)) }
+    static var settingGroupFields: Set<String> { Set(SettingGroup.CodingKeys.allCases.map(\.stringValue)) }
+    static var settingGroupTranslationFields: Set<String> { Set(SettingGroupTranslation.CodingKeys.allCases.map(\.stringValue)) }
     static var translationFields: Set<String> { Set(ManifestTranslation.CodingKeys.allCases.map(\.stringValue)) }
     static var settingTranslationFields: Set<String> { Set(SettingTranslation.CodingKeys.allCases.map(\.stringValue)) }
 
@@ -99,6 +101,7 @@ enum ManifestShape {
         // in words, not left to the decoder.
         let permissions = top.check("permissions", "an object") { $0.object != nil }?.object
         let settings = top.check("settings", "a list") { $0.array != nil }?.array
+        let groups = top.check("settingGroups", "a list") { $0.array != nil }?.array
         let window = top.check("window", "an object") { $0.object != nil }?.object
         var wrong = top.wrong
 
@@ -129,6 +132,8 @@ enum ManifestShape {
                 }
                 inner.check("min", "a whole number", isInteger)
                 inner.check("max", "a whole number", isInteger)
+                inner.string("group")
+                inner.string("section")
                 let options = inner.check("options", "a list") { $0.array != nil }?.array ?? []
                 wrong += inner.wrong
                 for (number, option) in options.enumerated() {
@@ -143,6 +148,19 @@ enum ManifestShape {
                     wrong += each.wrong
                 }
             }
+        }
+
+        for (index, group) in (groups ?? []).enumerated() {
+            let place = "settingGroups[\(index)]"
+            guard let object = group.object else {
+                wrong.append("\"\(place)\" must be an object, not \(kind(of: group))")
+                continue
+            }
+            var inner = Fields(object, place + ".")
+            inner.string("id", required: true)
+            inner.string("label", required: true)
+            inner.check("preview", "true or false") { if case .bool = $0 { true } else { false } }
+            wrong += inner.wrong
         }
 
         if let window {
@@ -164,6 +182,9 @@ enum ManifestShape {
         found += unknown(manifest.last("permissions"), permissionFields, "permissions.")
         found += unknown(manifest.last("window"), windowFields, "window.")
         found += unknown(manifest.last("restart"), restartFields, "restart.")
+        for (index, group) in (manifest.last("settingGroups")?.array ?? []).enumerated() {
+            found += unknown(group, settingGroupFields, "settingGroups[\(index)].")
+        }
         for (index, declaration) in (manifest.last("settings")?.array ?? []).enumerated() {
             let place = "settings[\(index)]."
             found += unknown(declaration, settingFields, place)
@@ -189,7 +210,24 @@ enum ManifestShape {
             .map { "has the field \"\($0)\", which a translation does not have" }
         top.wrong = []
         let settings = top.check("settings", "an object keyed by setting key") { $0.object != nil }?.object
+        let groups = top.check("settingGroups", "an object keyed by group id") { $0.object != nil }?.object
         wrong += top.wrong
+        let declaredGroups = manifest.map { Set($0.settingGroups.map(\.id)) }
+        for id in groups?.keys ?? [] {
+            guard let entry = groups?.last(id) else { continue }
+            let place = "settingGroups.\(id)"
+            if let declaredGroups, !declaredGroups.contains(id) {
+                wrong.append("translates the setting group \"\(id)\", which manifest.json does not declare")
+            }
+            guard let fields = entry.object else {
+                wrong.append("\"\(place)\" must be an object, not \(kind(of: entry))")
+                continue
+            }
+            var inner = Fields(fields, place + ".")
+            inner.string("label")
+            wrong += inner.wrong + fields.keys.filter { !settingGroupTranslationFields.contains($0) }
+                .map { "has the field \"\(place).\($0)\", which a translation does not have" }
+        }
         guard let settings else { return wrong }
         let declared = manifest.map { manifest in
             Dictionary(manifest.settings.map { ($0.key, Set(($0.options ?? []).map(\.value))) }) { first, _ in first }
@@ -207,6 +245,7 @@ enum ManifestShape {
             var inner = Fields(fields, place + ".")
             inner.string("label")
             inner.string("help")
+            inner.string("section")
             wrong += inner.wrong + fields.keys.filter { !settingTranslationFields.contains($0) }
                 .map { "has the field \"\(place).\($0)\", which a translation does not have" }
             inner.wrong = []

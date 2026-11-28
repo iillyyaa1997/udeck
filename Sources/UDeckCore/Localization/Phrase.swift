@@ -229,6 +229,12 @@ public enum Phrase: Sendable, Equatable {
     case catalogueUpdateAll(Int)
     case catalogueUpdateAllLeft(names: String)
     case pluginSettings
+    /// The tab of a plugin's settings that belong to none of its groups.
+    case pluginSettingsGeneral
+    /// Above the card a plugin draws beside a group of its settings.
+    case pluginSettingsPreview
+    /// Where that card is while the plugin is not running.
+    case pluginSettingsPreviewWaits
     case pluginEverySeconds(Int)
     case pluginLastFailure(reason: PluginFailure.Reason)
 

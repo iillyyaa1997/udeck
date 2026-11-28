@@ -24,6 +24,9 @@ public enum ResidentMessage: Equatable, Sendable {
     case pickFolder(id: String, prompt: String?)
     /// Bring the place `view` forward: its window, its mini window, its tab.
     case show(view: String)
+    /// The card that shows what the settings of `group` do, for Settings to
+    /// draw beside them — the answer to a `preview` event (0.9.32).
+    case preview(group: String, card: Card)
     /// Something uDeck does not know: kept out of the way, never fatal.
     case unknown(String)
 
@@ -43,7 +46,9 @@ public enum ResidentMessage: Equatable, Sendable {
         struct Unnotify: Decodable { var id: String }
         struct Pick: Decodable { var id: String; var prompt: String? }
         struct Show: Decodable { var view: String }
+        struct Preview: Decodable { var group: String; var card: Card }
         var card: Card?
+        var preview: Preview?
         var view: String?
         var keep: String?
         var name: String?
@@ -72,6 +77,8 @@ public enum ResidentMessage: Equatable, Sendable {
             self = .pickFolder(id: pick.id, prompt: pick.prompt)
         } else if let show = envelope.show {
             self = .show(view: show.view)
+        } else if let preview = envelope.preview {
+            self = .preview(group: preview.group, card: preview.card)
         } else {
             self = .unknown(String(line.prefix(200)))
         }
@@ -193,6 +200,14 @@ public enum ResidentEvent: Equatable, Sendable {
     /// A place of its own was closed. With `to`, the person asked for what it
     /// showed back on the board: show it in the place `to`.
     case closed(to: String?)
+    /// The plugin's settings as they are now, every one of them, after the
+    /// person changed one in Settings (0.9.32). The environment a plugin starts
+    /// with says them too; this is what changes while it runs.
+    case settings([String: SettingValue])
+    /// Settings shows the group `group`, which asks for a preview: answer with
+    /// a `preview` card. Asked again after every change of a setting, right
+    /// after the `settings` event that says it (0.9.32).
+    case preview(group: String)
 
     /// Which place an event is about, and what uDeck knows of it.
     public struct About: Equatable, Sendable {
@@ -230,6 +245,7 @@ public enum ResidentEvent: Equatable, Sendable {
         var to: String?
         var files: [String]?
         var keys: [String]?
+        var settings: [String: SettingValue]?
     }
 
     /// The event as one line for the plugin's stdin.
@@ -257,6 +273,11 @@ public enum ResidentEvent: Equatable, Sendable {
         case .link(let url, let keys):
             wire = Wire(event: "link", text: url)
             if !keys.isEmpty { wire.keys = keys }
+        case .settings(let values):
+            wire = Wire(event: "settings")
+            wire.settings = values
+        case .preview(let group):
+            wire = Wire(event: "preview", id: group)
         }
         if let place {
             wire.view = place.view

@@ -31,14 +31,19 @@ public struct ManifestTranslation: Codable, Equatable, Sendable {
     /// into existence, only rename one that is already there.
     public var settings: [String: SettingTranslation]?
 
+    /// Keyed by the group's `id`: its label in this language (0.9.32).
+    public var settingGroups: [String: SettingGroupTranslation]?
+
     public init(
         name: String? = nil,
         description: String? = nil,
-        settings: [String: SettingTranslation]? = nil
+        settings: [String: SettingTranslation]? = nil,
+        settingGroups: [String: SettingGroupTranslation]? = nil
     ) {
         self.name = name
         self.description = description
         self.settings = settings
+        self.settingGroups = settingGroups
     }
 
     /// See `GlassAppearance.init(from:)` — the same tolerance, for the same
@@ -48,7 +53,8 @@ public struct ManifestTranslation: Codable, Equatable, Sendable {
         self.init(
             name: try c.decodeIfPresent(String.self, forKey: .name),
             description: try c.decodeIfPresent(String.self, forKey: .description),
-            settings: try c.decodeIfPresent([String: SettingTranslation].self, forKey: .settings)
+            settings: try c.decodeIfPresent([String: SettingTranslation].self, forKey: .settings),
+            settingGroups: try? c.decodeIfPresent([String: SettingGroupTranslation].self, forKey: .settingGroups)
         )
     }
 
@@ -56,22 +62,35 @@ public struct ManifestTranslation: Codable, Equatable, Sendable {
         case name
         case description
         case settings
+        case settingGroups
     }
+}
+
+/// A setting group's label in another language.
+public struct SettingGroupTranslation: Codable, Equatable, Sendable {
+    public var label: String?
+
+    public init(label: String? = nil) { self.label = label }
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case label }
 }
 
 /// One declared setting, said in another language.
 public struct SettingTranslation: Codable, Equatable, Sendable {
     public var label: String?
     public var help: String?
+    /// The heading the setting starts under (0.9.32).
+    public var section: String?
 
     /// Keyed by the option's `value`, which is what the setting is stored as and
     /// therefore the one part of an option that must not be translated.
     public var options: [String: String]?
 
-    public init(label: String? = nil, help: String? = nil, options: [String: String]? = nil) {
+    public init(label: String? = nil, help: String? = nil, options: [String: String]? = nil, section: String? = nil) {
         self.label = label
         self.help = help
         self.options = options
+        self.section = section
     }
 
     public init(from decoder: any Decoder) throws {
@@ -79,7 +98,8 @@ public struct SettingTranslation: Codable, Equatable, Sendable {
         self.init(
             label: try c.decodeIfPresent(String.self, forKey: .label),
             help: try c.decodeIfPresent(String.self, forKey: .help),
-            options: try c.decodeIfPresent([String: String].self, forKey: .options)
+            options: try c.decodeIfPresent([String: String].self, forKey: .options),
+            section: try? c.decodeIfPresent(String.self, forKey: .section)
         )
     }
 
@@ -87,6 +107,7 @@ public struct SettingTranslation: Codable, Equatable, Sendable {
         case label
         case help
         case options
+        case section
     }
 }
 
@@ -103,6 +124,14 @@ public extension PluginManifest {
         if let description = translation.description, !description.isEmpty {
             result.description = description
         }
+        if let groups = translation.settingGroups, !groups.isEmpty {
+            result.settingGroups = settingGroups.map { group in
+                guard let label = groups[group.id]?.label, !label.isEmpty else { return group }
+                var group = group
+                group.label = label
+                return group
+            }
+        }
         guard let translated = translation.settings, !translated.isEmpty else { return result }
 
         result.settings = settings.map { declaration in
@@ -110,6 +139,7 @@ public extension PluginManifest {
             var declaration = declaration
             if let label = t.label, !label.isEmpty { declaration.label = label }
             if let help = t.help, !help.isEmpty { declaration.help = help }
+            if let section = t.section, !section.isEmpty, declaration.section != nil { declaration.section = section }
             if let names = t.options, let options = declaration.options {
                 declaration.options = options.map { option in
                     guard let label = names[option.value], !label.isEmpty else { return option }

@@ -70,6 +70,37 @@ public struct SettingOption: Codable, Equatable, Sendable {
     }
 }
 
+/// A group of a plugin's settings, shown as a tab of its own in Settings
+/// (uDeck 0.9.32). With `preview`, the plugin — a resident one, running — is
+/// asked for a card that shows what the group's settings do, and uDeck draws
+/// it beside them as they change (`ResidentEvent.preview`).
+public struct SettingGroup: Codable, Equatable, Sendable {
+    public var id: String
+    public var label: String
+    public var preview: Bool?
+
+    /// The most groups a plugin has: tabs past these would not fit.
+    public static let limit = 8
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, label, preview }
+
+    public init(id: String, label: String, preview: Bool? = nil) {
+        self.id = id
+        self.label = label
+        self.preview = preview
+    }
+
+    /// Whether uDeck asks the plugin for a card for this group.
+    public var hasPreview: Bool { preview == true }
+
+    /// Why this group cannot be shown, if it cannot.
+    public var problem: String? {
+        if !SettingDeclaration.isKey(id) { return "id must be lowercase letters, digits and underscores" }
+        if Blank.isBlank(label) { return "label must not be blank" }
+        return nil
+    }
+}
+
 /// A setting a plugin declares so the host can render it.
 public struct SettingDeclaration: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable, CaseIterable {
@@ -87,6 +118,12 @@ public struct SettingDeclaration: Codable, Equatable, Sendable {
     public var minimum: Int?
     public var maximum: Int?
     public var options: [SettingOption]?
+    /// The group the setting is shown in — one the manifest's
+    /// `settingGroups` declares (uDeck 0.9.32); none, the first, unnamed one.
+    public var group: String?
+    /// A heading the setting starts under within its group, said once for the
+    /// settings that follow it (0.9.32).
+    public var section: String?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case key, type, label, help
@@ -94,6 +131,7 @@ public struct SettingDeclaration: Codable, Equatable, Sendable {
         case minimum = "min"
         case maximum = "max"
         case options
+        case group, section
     }
 
     public init(
@@ -104,7 +142,9 @@ public struct SettingDeclaration: Codable, Equatable, Sendable {
         defaultValue: SettingValue,
         minimum: Int? = nil,
         maximum: Int? = nil,
-        options: [SettingOption]? = nil
+        options: [SettingOption]? = nil,
+        group: String? = nil,
+        section: String? = nil
     ) {
         self.key = key
         self.type = type
@@ -114,6 +154,8 @@ public struct SettingDeclaration: Codable, Equatable, Sendable {
         self.minimum = minimum
         self.maximum = maximum
         self.options = options
+        self.group = group
+        self.section = section
     }
 
     /// Why this declaration cannot be rendered, if it cannot.

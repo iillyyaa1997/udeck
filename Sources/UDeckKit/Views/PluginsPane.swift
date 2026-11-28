@@ -466,12 +466,7 @@ struct InstalledPluginCard: View {
         if !manifest.settings.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 Text(strings(.pluginSettings)).font(.subheadline.weight(.semibold))
-                // By position: a manifest with two settings sharing a key is
-                // reported as a problem, and must still render rather than
-                // collapsing two rows into one.
-                ForEach(Array(manifest.settings.enumerated()), id: \.offset) { _, declaration in
-                    settingControl(declaration, for: manifest.id)
-                }
+                PluginSettingsView(manifest: manifest, model: model)
             }
         }
 
@@ -657,71 +652,6 @@ struct InstalledPluginCard: View {
         return grant.granted.contains(capability)
     }
 
-    @ViewBuilder
-    private func settingControl(_ declaration: SettingDeclaration, for id: PluginIdentifier) -> some View {
-        let value = model.pluginSettings.value(of: declaration, for: id)
-
-        switch declaration.type {
-        case .bool:
-            Toggle(declaration.label, isOn: Binding(
-                get: { if case .bool(let flag) = value { flag } else { false } },
-                set: { model.setSetting(.bool($0), key: declaration.key, for: id) }
-            ))
-            .help(declaration.help ?? "")
-
-        case .int:
-            // The bounds come from a plugin's manifest, so they cannot be
-            // trusted to be a valid range: a declaration with `min` and no
-            // `max` produced `2000...1000`, which is a fatal error rather than
-            // an empty range. The range is built to be legal whatever arrives,
-            // and the value is brought inside it before it is shown.
-            let range = declaration.editingRange
-            LabeledContent(declaration.label) {
-                Stepper(
-                    value: Binding(
-                        get: {
-                            guard case .int(let number) = value else { return range.lowerBound }
-                            return min(max(number, range.lowerBound), range.upperBound)
-                        },
-                        set: { model.setSetting(.int($0), key: declaration.key, for: id) }
-                    ),
-                    in: range
-                ) {
-                    Text(String(describing: value.jsonLiteral))
-                }
-            }
-            .help(declaration.help ?? "")
-
-        case .string:
-            LabeledContent(declaration.label) {
-                TextField("", text: Binding(
-                    get: { if case .string(let text) = value { text } else { "" } },
-                    set: { model.setSetting(.string($0), key: declaration.key, for: id) }
-                ))
-                .frame(width: 240)
-            }
-            .help(declaration.help ?? "")
-
-        case .enumeration:
-            LabeledContent(declaration.label) {
-                Picker("", selection: Binding(
-                    get: { if case .string(let text) = value { text } else { "" } },
-                    set: { model.setSetting(.string($0), key: declaration.key, for: id) }
-                )) {
-                    ForEach(declaration.options ?? [], id: \.value) { option in
-                        Text(option.label).tag(option.value)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 240)
-            }
-            .help(declaration.help ?? "")
-        }
-
-        if let help = declaration.help {
-            Text(help).font(.caption2).foregroundStyle(.secondary)
-        }
-    }
 }
 
 /// The card of a plugin installed through uDeck whose folder has gone: its
