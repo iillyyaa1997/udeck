@@ -83,7 +83,8 @@ struct AgentsContextTests {
             #"{"type":"system","subtype":"compact_boundary","timestamp":"\#(stamp(-30))","compactMetadata":{"trigger":"manual","preTokens":70300}}"#,
             #"{"type":"user","timestamp":"\#(stamp(-29))","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued…"}}"#,
             #"{"type":"user","timestamp":"\#(stamp(-20))","message":{"role":"user","content":"go on"}}"#,
-            #"{"type":"assistant","timestamp":"\#(stamp(-19))","message":{"usage":\#(usage(9_000, 100)),"content":[{"type":"text","text":"on it"}]}}"#,
+            #"{"type":"assistant","timestamp":"\#(stamp(-19))","message":{"model":"claude-opus-5-5","usage":\#(usage(9_000, 100)),"content":[{"type":"text","text":"on it"}]}}"#,
+            #"{"type":"assistant","timestamp":"\#(stamp(-18))","message":{"model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}"#,
         ]
         try (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
         // Before the compaction: what the Read added.
@@ -101,6 +102,7 @@ struct AgentsContextTests {
         #expect(track.tokens == 9_202, "the last call: its prompt and its answer")
         #expect(track.cacheCold(now: now) != nil, "an hour's cache from a call 19 minutes ago")
         #expect(!track.isEmpty)
+        #expect(track.model == "claude-opus-5-5", "the last real answer's model, not a synthetic one's")
         #expect(ContextTrack.rebuilt(from: file.appendingPathExtension("missing")).isEmpty)
     }
 

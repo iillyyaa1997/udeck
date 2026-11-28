@@ -148,9 +148,11 @@ struct AgentsPlacesTests {
         ]
         try (lines.joined(separator: "\n") + "\n").write(to: folder.appendingPathComponent("\(id).jsonl"),
                                                          atomically: true, encoding: .utf8)
-        await hello(app, "B", keep: Kept(id: UUID(), claude: id, account: "main").text)
+        await hello(app, "B", keep: Kept(id: UUID(), claude: id, account: "main", model: "opus", effort: "high").text)
         let session = try #require(app.conversations.first)
         #expect(app.places["B"]?.selection == session.id)
+        #expect(session.claude?.chosenModel == "opus", "the model chosen on the card, kept across the restart")
+        #expect(session.claude?.effort == "high")
         #expect(app.heldBack.isEmpty, "its own session, written a moment ago by this plugin")
         #expect(session.folder.path == home.path)
         try await until("resumed") { session.claude?.state == .idle }
@@ -160,8 +162,11 @@ struct AgentsPlacesTests {
     @Test("what a place keeps reads back; anything else, or a session id that would leave its folder, does not")
     func kept() throws {
         let id = UUID()
-        let kept = Kept(id: id, claude: "abc-123", account: "work", folder: "/tmp/x", title: "Fix it")
+        let kept = Kept(id: id, claude: "abc-123", account: "work", folder: "/tmp/x", title: "Fix it",
+                        model: "claude-opus-5-5[1m]", effort: "xhigh")
         #expect(Kept(kept.text) == kept)
+        #expect(Kept(#"{"claude":"abc","model":"opus; rm -rf /","effort":"$(x)"}"#)?.model == nil, "not a model's name")
+        #expect(Kept(#"{"claude":"abc","model":"opus; rm -rf /","effort":"$(x)"}"#)?.effort == nil)
         #expect(Kept(#"{"claude":"../../etc/passwd"}"#) == nil)
         #expect(Kept("not json") == nil)
         #expect(Kept("{}") == nil)

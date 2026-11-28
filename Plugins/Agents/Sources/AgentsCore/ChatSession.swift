@@ -119,6 +119,8 @@ public final class ChatSession: Identifiable {
     /// What the transcript says of the context, for a session continued:
     /// kept unless the session has told more since.
     public func restoreContext(_ track: ContextTrack) {
+        // The card names the model before the CLI says it, at the first turn.
+        if model == nil { model = track.model }
         guard contextTrack.isEmpty || contextTrack.points.isEmpty else { return }
         contextTrack = track
     }

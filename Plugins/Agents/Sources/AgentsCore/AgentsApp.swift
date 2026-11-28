@@ -349,8 +349,9 @@ public final class AgentsApp {
                 return
             }
             log.say("restore claude \(sessionID) under \(login.name)")
-            // Its own, a moment ago: no other program has it open.
-            open(saved, account: login, holdIfRecent: false)
+            // Its own, a moment ago: no other program has it open. With the
+            // model and the effort it ran with here.
+            open(saved, account: login, holdIfRecent: false, model: kept.model, effort: kept.effort)
         } else if let threadID = kept.codex {
             let folder = URL(fileURLWithPath: kept.folder ?? home.path, isDirectory: true)
             let session = CodexSession(folder: folder, title: kept.title, threadID: threadID)
@@ -533,7 +534,8 @@ public final class AgentsApp {
     /// A saved session, continued here. One its transcript was written to a
     /// moment ago may be open in another program, and is held back to be
     /// read first — unless it is this plugin's own (`restore`).
-    private func open(_ saved: SavedSession, account: ChatAccount? = nil, holdIfRecent: Bool = true) {
+    private func open(_ saved: SavedSession, account: ChatAccount? = nil, holdIfRecent: Bool = true,
+                      model: String? = nil, effort: String? = nil) {
         if let open = conversations.first(where: { $0.claude?.sessionID == saved.sessionID && !($0.claude?.isEnded ?? true) }) {
             show(open.id)
             return
@@ -542,6 +544,8 @@ public final class AgentsApp {
         let (title, source) = saved.named
         let session = ChatSession(folder: folder, account: account ?? historyAccount(for: saved), title: title,
                                   titleSource: source, resumeID: saved.sessionID)
+        session.chosenModel = model
+        session.effort = effort
         session.note("loading-history")
         let conversation = adopt(.claude(session))
         showingHistory = false

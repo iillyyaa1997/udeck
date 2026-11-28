@@ -44,6 +44,8 @@ public struct ContextTrack: Sendable, Equatable {
     public private(set) var heavy: [Piece] = []
     public private(set) var compactions: [Compaction] = []
     public private(set) var costUSD: Double?
+    /// The model the last answer came from, as the transcript says.
+    public private(set) var model: String?
     public private(set) var wallMs = 0
     public private(set) var apiMs = 0
 
@@ -184,6 +186,7 @@ extension ContextTrack {
                 }
             case "assistant" where entry["isSidechain"]?.bool != true:
                 let message = entry["message"] ?? .null
+                if let model = message["model"]?.string, !model.isEmpty, !model.hasPrefix("<") { track.model = model }
                 if let usage = message["usage"].flatMap(ClaudeCallUsage.init), usage.prompt > 0 {
                     track.compactionLeft(usage.prompt, at: at)
                     track.call(usage, at: at)
