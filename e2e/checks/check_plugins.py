@@ -52,6 +52,7 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
 import json
 import re
 import shlex
@@ -8056,3 +8057,177 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+_KEY = """
+tell application "System Events" to tell process %(process)s
+  set frontmost to true
+  key code KEYCODE USING
+end tell
+return "pressed"
+"""
+
+
+def _key(machine, code, step, using=""):
+    script = ui._applescript(_KEY, process=ui.PROCESS).replace("KEYCODE", str(code)).replace(
+        "USING", (" using {" + using + "}") if using else "")
+    ui.ask(machine, script, step)
+
+
+def _rich(machine, check_dir, lab, width, name):
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin, the stand-in CLI and a project")
+    _write(machine, SETTINGS, {"language": "ru"}, "uDeck in Russian")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake, "name_chats": False}}},
+           "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": width, "height": 11}]}]}, "placing Agents")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=40)
+    machine.click(*new.middle, "＋")
+    machine.sleep(1)
+    option = ui.wait_for(machine, "row.button.new.new:claude", "a new Claude session", ui.PANEL, seconds=8)
+    machine.click(*option.middle, "a new Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "the folder")
+    machine.sleep(4)
+    field = ui.wait_for(machine, "row.input.message", "the field", ui.PANEL, seconds=30)
+    machine.click(*field.middle, "the field")
+    ui.type_text(machine, "[rich] show me", "asking for a rich answer")
+    ui.press_return(machine, "sending it")
+    machine.sleep(5)
+    machine.screenshot(check_dir, f"{name} 1 the answer drawn")
+    found = ui.walk(machine, "the feed", ui.PANEL)
+    links = [w for w in found if w.role == "AXLink"]
+    print(f"{name} links:", [(w.title, w.value, w.description, w.frame) for w in links][:10])
+    print(f"{name} tables:", [w.identifier for w in found if "feed.table" in w.identifier or "feed.code" in w.identifier])
+    target = next((w for w in links if "notes.md" in (w.title + w.value + w.description) and w.frame), None)
+    if target:
+        x, y, w, h = target.frame
+        machine.click(int(x + w / 2), int(y + h / 2), "the notes.md link")
+        machine.sleep(3)
+        print(f"{name} opened:", machine.ssh.run("pgrep -lf 'TextEdit|Xcode|Code' || true", "what opened").stdout.strip())
+        machine.screenshot(check_dir, f"{name} 2 after the link")
+
+
+def check_agents_rich(machine, check_dir, lab):
+    """An answer with a table, code with Copy, a quote, a rule, nested points and a path link, in a wide card."""
+    _rich(machine, check_dir, lab, 8, "rich")
+
+
+def check_agents_richnarrow(machine, check_dir, lab):
+    """The same answer in a narrow card: the table as a list."""
+    _rich(machine, check_dir, lab, 3, "narrow")
+
+
+def check_agents_context(machine, check_dir, lab):
+    """The context as the operator built it (11-28), and each plugin's page of its own (0.9.34): the badge on the card and
+    its details on a click; Settings → «Все плагины» as tiles; Agents in the sidebar, its page at the operator's window
+    size, «Контекст» with the sample beside it staying in sight while the settings scroll; a switch changing the sample at
+    once; a narrow window with the sample under the settings."""
+    import time
+    _rich(machine, check_dir, lab, 8, "ctx")
+    try:
+        ui.wait_for(machine, "row.input.message", "the field still there", ui.PANEL, seconds=4)
+    except NotThere:
+        _open_the_panel(machine, "back to the panel")
+        machine.sleep(2)
+    # The badge, and what a click on it shows.
+    badge = ui.wait_for(machine, "row.status.badge.details", "the context badge", ui.PANEL, seconds=20)
+    machine.click(*badge.middle, "the context badge")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "ctx 1 the details")
+    _key(machine, 53, "Escape: the details away")
+    machine.sleep(1)
+    _key(machine, 53, "Escape: the panel away")
+    machine.sleep(1)
+
+    ru = ui.RUSSIAN
+    win = ru.settings_window
+    ui.plugins_pane(machine, "opening Settings → Plugins", language=ru)
+    # The operator's window: 1221 × 755 points (his screenshot, 11-28).
+    size = ui.place_settings(machine, "the operator's size", frame=(60, 40, 1220, 760), window=win)
+    machine.sleep(2)
+    machine.screenshot(check_dir, "pages 1 all plugins as tiles")
+    texts = [w.value or w.title for w in ui.walk(machine, "all plugins", win) if w.role == "AXStaticText"]
+    print("pages all plugins texts:", texts[:60])
+
+    ui.click(machine, "section.plugin.agents", "Agents in the sidebar", win)
+    ui.wait_for(machine, "plugins.card.agents", "Agents' own page", win)
+    machine.sleep(2)
+    machine.screenshot(check_dir, "pages 2 the agents page")
+
+    ui.click(machine, "plugin.agents.settings.groups", "the middle tab: Контекст", win)
+    started, tries = time.monotonic(), []
+    for _ in range(30):
+        at = time.monotonic()
+        try:
+            ui.walk(machine, "probing the settings after the tab", win)
+            tries.append((round(at - started, 1), round(time.monotonic() - at, 1), "ok"))
+            break
+        except LabError as problem:
+            tries.append((round(at - started, 1), round(time.monotonic() - at, 1), str(problem)[-50:]))
+            machine.sleep(1)
+    print("ctx tab switch probe:", tries)
+    expect(tries[-1][2] == "ok" and tries[-1][0] + tries[-1][1] < 5, f"uDeck slow to answer after switching to «Контекст»: {tries}")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "pages 3 context beside its sample")
+    walked = ui.walk(machine, "the context tab", win)
+    sample = next((w for w in walked if w.identifier == "plugin.agents.settings.preview"), None)
+    cache = next((w for w in walked if w.identifier == "plugin.agents.setting.ctx_cache"), None)
+    expect(sample is not None and cache is not None and sample.frame and cache.frame, f"no sample or no «Тёплый кэш»: {sample}, {cache}")
+    print("pages before the scroll: sample", sample.frame, "cache switch", cache.frame, "window", (size.x, size.y, size.width, size.height))
+    expect(sample.frame[0] > cache.frame[0] + 200, f"the sample not beside the settings at the operator's size: {sample.frame} vs {cache.frame}")
+    texts = [w.value or w.title for w in walked if w.role == "AXStaticText"]
+    expect(any("Кэш" == t for t in texts), f"the sample shows the cache before the switch: {texts[:80]}")
+
+    # Scrolled: the settings go up, the sample stays in sight.
+    machine.scroll(size.x + 520, size.y + 520, -320, "scrolling the settings down")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "pages 4 scrolled the sample stays")
+    walked = ui.walk(machine, "after the scroll", win)
+    sample2 = next((w for w in walked if w.identifier == "plugin.agents.settings.preview"), None)
+    cache2 = next((w for w in walked if w.identifier == "plugin.agents.setting.ctx_cache"), None)
+    print("pages after the scroll: sample", sample2 and sample2.frame, "cache switch", cache2 and cache2.frame)
+    moved_settings = cache.frame[1] - cache2.frame[1]
+    moved_sample = sample.frame[1] - sample2.frame[1]
+    expect(moved_settings > 150, f"the page did not scroll: the settings moved {moved_settings}")
+    expect(moved_sample < moved_settings - 100, f"the sample went up with the settings: {moved_sample} vs {moved_settings}")
+
+    ui.click(machine, "plugin.agents.setting.ctx_cache", "switching «Тёплый кэш» off", win)
+    machine.sleep(3)
+    machine.screenshot(check_dir, "pages 5 after the switch")
+    after = [w.value or w.title for w in ui.walk(machine, "the settings after", win) if w.role == "AXStaticText"]
+    expect(not any("Кэш" == t for t in after), f"the sample still shows the cache after switching it off: {after[:80]}")
+
+    # A narrow window: the sample under the settings, nothing past the window's left edge.
+    placed = ui.place_settings(machine, "the settings window narrow", frame=(60, 40, 900, 1000), window=win)
+    machine.sleep(3)
+    machine.screenshot(check_dir, "pages 6 a narrow window")
+    walked = ui.walk(machine, "the narrow settings", win)
+    print("ctx narrow window:", (placed.x, placed.y, placed.width, placed.height))
+    past = [(w.role, w.identifier, w.title or w.value, w.frame) for w in walked if w.frame and w.frame[0] < placed.x - 2]
+    expect(not past, f"past the narrow window's left edge: {past[:10]}")
+    sample = next((w for w in walked if w.identifier == "plugin.agents.settings.preview"), None)
+    mark = next((w for w in walked if w.identifier == "plugin.agents.setting.ctx_mark"), None)
+    expect(sample is not None and mark is not None and sample.frame and mark.frame,
+           f"the sample or the last setting not found in the narrow window: {sample}, {mark}")
+    print("ctx narrow sample:", sample.frame, "last setting:", mark.frame)
+    expect(sample.frame[1] > mark.frame[1], f"the sample not under the settings in a narrow window: {sample.frame} vs {mark.frame}")
