@@ -29,6 +29,16 @@ public final class ShellState {
     /// that knows which direction this transition is going.
     public internal(set) var contentAnimation: Animation = .default
 
+    /// The size of the panel the workspace is shown in — open, or full
+    /// screen — kept while the panel is away.
+    ///
+    /// The workspace is built once and kept, hidden, between reveals, laid out
+    /// at this size and only clipped by the moving panel. Built afresh on every
+    /// reveal, with every card in it, it held the main thread 132–188 ms in
+    /// the lab and 85–133 ms on the operator's Mac each time the panel opened
+    /// (11-27: «анимация тормозит … навёл, жду, и потом только он выплывает»).
+    public internal(set) var workspaceSize: CGSize = .zero
+
     /// How far the panel window reaches above the menu bar's lower edge on the
     /// screen it is currently on.
     ///
