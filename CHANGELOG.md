@@ -8,6 +8,19 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.33] — 2026-11-28
+
+- **A plugin's settings fit a narrow Settings window.** The live sample
+  stands beside the settings where there is room and under them where there
+  is not; in 0.9.32 it pushed the page past the window's left edge. Switching
+  to a tab with a sample no longer keeps uDeck busy for seconds.
+- **A card's buttons named in words look like buttons** — «Сжать»,
+  «Отправить все» and the like were drawn as plain words.
+- Agents (installed separately) always shows every part of the context you
+  chose, saying when one will be known, and a session continued after Agents
+  starts again shows its line, turns, what took the most and its cache at
+  once, read back from the session's transcript.
+
 ## [0.9.32] — 2026-11-28
 
 - **A plugin's settings in tabs, with a live sample beside them.** A plugin

@@ -143,8 +143,9 @@ public enum ContractFeatures {
     /// 0.9.24 a badge's `busy` and `shorter`; 0.9.25 an input's `suggest`;
     /// 0.9.26 changes nothing in it, nor does 0.9.27 (its `link` event and the
     /// feed's tables are the docs'), nor 0.9.28 to 0.9.31; 0.9.32 brings
-    /// settings in groups with a preview, a badge's details and a meter's parts.
-    static let reviewedAt = "0.9.32"
+    /// settings in groups with a preview, a badge's details and a meter's parts;
+    /// 0.9.33 changes nothing in it.
+    static let reviewedAt = "0.9.33"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
