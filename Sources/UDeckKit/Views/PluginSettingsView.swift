@@ -43,15 +43,9 @@ struct PluginSettingsView: View {
                 // them where it is not: side by side in a narrow window it
                 // pushed the whole page past the window's left edge (the
                 // operator's Mac, 11-28: «Все сломалось»).
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 16) {
-                        controls.frame(minWidth: 360, maxWidth: .infinity, alignment: .leading)
-                        preview(previewing)
-                    }
-                    VStack(alignment: .leading, spacing: 16) {
-                        controls
-                        preview(previewing)
-                    }
+                BesideOrUnder {
+                    controls
+                    preview(previewing)
                 }
             } else {
                 controls
@@ -118,6 +112,55 @@ struct PluginSettingsView: View {
             }
         }
         .frame(width: 340)
+    }
+}
+
+/// Two views: the second beside the first where the first still has
+/// `leastLeading` points, under it where it would not.
+///
+/// Not `ViewThatFits`: that built the settings and the sample twice and
+/// measured each candidate over and over, and switching to a tab with a
+/// sample stalled uDeck for seconds in the lab (11-28). This measures the
+/// second view once a pass and gives the first what is left.
+struct BesideOrUnder: Layout {
+    var spacing: CGFloat = 16
+    var leastLeading: CGFloat = 360
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        let trailing = subviews[1].sizeThatFits(.unspecified)
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil }
+        if beside(width, trailing: trailing.width) {
+            let leading = subviews[0].sizeThatFits(ProposedViewSize(width: width.map { $0 - spacing - trailing.width }, height: nil))
+            return CGSize(width: width ?? leading.width + spacing + trailing.width,
+                          height: max(leading.height, trailing.height))
+        }
+        let leading = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil))
+        return CGSize(width: width ?? max(leading.width, trailing.width),
+                      height: leading.height + spacing + trailing.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let trailing = subviews[1].sizeThatFits(.unspecified)
+        if beside(bounds.width, trailing: trailing.width) {
+            subviews[0].place(at: bounds.origin, anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width - spacing - trailing.width, height: nil))
+            subviews[1].place(at: CGPoint(x: bounds.maxX - trailing.width, y: bounds.minY), anchor: .topLeading,
+                              proposal: ProposedViewSize(trailing))
+        } else {
+            let leading = subviews[0].sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+            subviews[0].place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(width: bounds.width, height: nil))
+            subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + leading.height + spacing), anchor: .topLeading,
+                              proposal: ProposedViewSize(trailing))
+        }
+    }
+
+    /// Whether the second view goes beside the first in `width`; with no
+    /// width given, the ideal is side by side.
+    func beside(_ width: CGFloat?, trailing: CGFloat) -> Bool {
+        guard let width else { return true }
+        return width >= leastLeading + spacing + trailing
     }
 }
 
