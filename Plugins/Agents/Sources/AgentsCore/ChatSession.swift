@@ -116,6 +116,13 @@ public final class ChatSession: Identifiable {
     /// the compactions (`ContextTrack`).
     public private(set) var contextTrack = ContextTrack()
 
+    /// What the transcript says of the context, for a session continued:
+    /// kept unless the session has told more since.
+    public func restoreContext(_ track: ContextTrack) {
+        guard contextTrack.isEmpty || contextTrack.points.isEmpty else { return }
+        contextTrack = track
+    }
+
     /// How full the context is now: after the last call, else as last asked.
     public var contextTokens: Int? { contextTrack.tokens ?? context?.tokens }
     /// When the running turn began, while one runs.

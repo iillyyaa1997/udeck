@@ -767,6 +767,14 @@ public final class AgentsApp {
         if let resume {
             let stopped = await Orphans.stop(resuming: resume)
             if !stopped.isEmpty { log.say("orphans of \(resume) stopped: \(stopped)") }
+            // The context's line, turns and cache, from what the transcript says.
+            let config = session.account.configDir ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
+            Task { [weak session] in
+                let track = await Task.detached(priority: .utility) { () -> ContextTrack? in
+                    SessionHistory.transcript(ofSession: resume, config: config).map { ContextTrack.rebuilt(from: $0) }
+                }.value
+                if let track, let session { session.restoreContext(track); self.render() }
+            }
         }
         do {
             let process = try AgentProcess(executable: executable, arguments: arguments, environment: environment,

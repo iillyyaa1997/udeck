@@ -1,4 +1,5 @@
 import Foundation
+import UDeckAgents
 
 /// What Agents keeps of a session's context as it goes (the operator's
 /// builder, 11-28): how full it is now, how it grew turn by turn, what in it
@@ -146,4 +147,67 @@ public struct ContextTrack: Sendable, Equatable {
         let cold = lastCall.addingTimeInterval(cacheLife)
         return cold > now ? cold : nil
     }
+}
+
+extension ContextTrack {
+    /// The track as the session's transcript tells it, its last `tail` bytes:
+    /// each answer's tokens and time, the tools called, where the person spoke
+    /// (a turn's end before it) and the compactions — so that a session
+    /// continued after Agents started again shows its line, its turns, what
+    /// took the most and its cache at once, not after turns of its own (the
+    /// operator, 11-28: the details empty after an update).
+    public static func rebuilt(from file: URL, tail: Int = 6_000_000) -> ContextTrack {
+        var track = ContextTrack()
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return track }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let start = size > UInt64(tail) ? size - UInt64(tail) : 0
+        try? handle.seek(toOffset: start)
+        guard let data = try? handle.readToEnd() else { return track }
+        var lines = data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)
+        if start > 0, !lines.isEmpty { lines.removeFirst() }
+        let dates = ISO8601DateFormatter()
+        dates.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var spoke = false
+        for line in lines {
+            guard let entry = JSONValue.line(Substring(decoding: line, as: UTF8.self)) else { continue }
+            let at = entry["timestamp"]?.string.flatMap(dates.date(from:)) ?? Date()
+            switch entry["type"]?.string {
+            case "user" where entry["isSidechain"]?.bool != true:
+                // The person's words, not a tool's result: the turn before it ended.
+                let content = entry["message"]?["content"]
+                let said = content?.string != nil
+                    || (content?.array ?? []).contains { $0["type"]?.string == "text" }
+                if said, entry["isMeta"]?.bool != true, entry["isCompactSummary"]?.bool != true {
+                    if spoke { track.turnEnded(at: at, costUSD: nil, durationMs: nil, apiMs: nil) }
+                    spoke = true
+                }
+            case "assistant" where entry["isSidechain"]?.bool != true:
+                let message = entry["message"] ?? .null
+                if let usage = message["usage"].flatMap(ClaudeCallUsage.init), usage.prompt > 0 {
+                    track.compactionLeft(usage.prompt, at: at)
+                    track.call(usage, at: at)
+                }
+                for block in message["content"]?.array ?? [] where block["type"]?.string == "tool_use" {
+                    let name = block["name"]?.string ?? ""
+                    let summary = ToolSummary.of(name: name, input: block["input"] ?? .null)
+                    track.tool(id: "tool-" + (block["id"]?.string ?? ""), label: summary.isEmpty ? name : name + " " + summary)
+                }
+            case "system" where entry["subtype"]?.string == "compact_boundary":
+                track.compacted(at: at, from: entry["compactMetadata"]?["preTokens"]?.int)
+            default:
+                break
+            }
+        }
+        return track
+    }
+
+    /// The first call after a compaction says what it left.
+    mutating func compactionLeft(_ tokens: Int, at date: Date) {
+        guard let last = compactions.indices.last, compactions[last].toTokens == nil else { return }
+        measured(tokens, at: date)
+    }
+
+    /// Whether anything is known yet.
+    public var isEmpty: Bool { tokens == nil && points.isEmpty && compactions.isEmpty }
 }

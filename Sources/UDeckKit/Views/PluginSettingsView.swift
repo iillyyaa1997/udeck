@@ -39,9 +39,19 @@ struct PluginSettingsView: View {
                 .accessibilityIdentifier("plugin.\(manifest.id.rawValue).settings.groups")
             }
             if let previewing {
-                HStack(alignment: .top, spacing: 16) {
-                    controls.frame(maxWidth: .infinity, alignment: .leading)
-                    preview(previewing)
+                // Beside the settings where the window is wide enough, under
+                // them where it is not: side by side in a narrow window it
+                // pushed the whole page past the window's left edge (the
+                // operator's Mac, 11-28: «Все сломалось»).
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 16) {
+                        controls.frame(minWidth: 360, maxWidth: .infinity, alignment: .leading)
+                        preview(previewing)
+                    }
+                    VStack(alignment: .leading, spacing: 16) {
+                        controls
+                        preview(previewing)
+                    }
                 }
             } else {
                 controls

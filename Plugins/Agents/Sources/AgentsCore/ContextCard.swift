@@ -42,11 +42,11 @@ enum ContextCard {
                          compactsAt: claude.context?.compactsAt, points: track.points, compactions: track.compactions,
                          turnGrowth: track.turnGrowth, heavy: track.heavy, cacheCold: track.cacheCold(),
                          cacheWarm: track.lastCall != nil, costUSD: track.costUSD, wallMs: track.wallMs, apiMs: track.apiMs,
-                         model: session.current.currentModel?.name, effort: session.current.effort.map { AgentsCard.effortName($0, app) },
+                         model: session.current.modelName, effort: session.current.effort.map { AgentsCard.effortName($0, app) },
                          account: claude.account.name, week: limits?.week, weekPerHour: limits?.weekPerHour())
         case .codex:
             guard let percent = session.current.contextPercent else { return nil }
-            return Facts(tokens: Int(percent * 10_000), window: 1_000_000, model: session.current.currentModel?.name,
+            return Facts(tokens: Int(percent * 10_000), window: 1_000_000, model: session.current.modelName,
                          effort: session.current.effort.map { AgentsCard.effortName($0, app) })
         }
     }
@@ -130,18 +130,34 @@ enum ContextCard {
                               " · compacted at \(clock(last.at)): \(pct(from, facts.window))% → \(pct(to, facts.window))%")
             }
             rows.append(["spark": ["values": .array(Array(values)), "caption": .string(said)]])
+        } else if look.graph {
+            // Every part chosen is there, said when it will be known — not
+            // left out until then (the operator, 11-28: «совсем не то что я
+            // апрувил», the details bare after Agents started again).
+            rows.append(["kv": [.string(app.t("Как рос", "How it grew")), .string(app.t("после пары ходов", "after a couple of turns"))]])
         }
-        if look.turns, let left = turnsLeft(facts, look), let growth = facts.turnGrowth {
-            rows.append(["text": .string(app.t("≈ \(left) \(turnsWord(left)) до сжатия — сейчас ход добавляет ~\(tokens(growth))",
-                                               "≈ \(left) turns to compaction — a turn adds ~\(tokens(growth)) now"))])
+        if look.turns {
+            if let left = turnsLeft(facts, look), let growth = facts.turnGrowth {
+                rows.append(["text": .string(app.t("≈ \(left) \(turnsWord(left)) до сжатия — сейчас ход добавляет ~\(tokens(growth))",
+                                                   "≈ \(left) turns to compaction — a turn adds ~\(tokens(growth)) now"))])
+            } else {
+                rows.append(["kv": [.string(app.t("До сжатия", "To compaction")), .string(app.t("посчитаю после хода", "known after a turn"))]])
+            }
         }
-        if look.heavy, !facts.heavy.isEmpty {
+        if look.heavy {
             rows.append(["text": .string(app.t("Больше всего заняли", "What took the most"))])
-            rows.append(["list": .array(facts.heavy.prefix(4).map { piece in
-                ["text": .string(String(piece.label.prefix(60))), "note": .string(tokens(piece.tokens))]
-            })])
+            if facts.heavy.isEmpty {
+                rows.append(["text": .string(app.t("пока ничего заметного", "nothing large yet"))])
+            } else {
+                rows.append(["list": .array(facts.heavy.prefix(4).map { piece in
+                    ["text": .string(String(piece.label.prefix(60))), "note": .string(tokens(piece.tokens))]
+                })])
+            }
         }
         var pairs: [(String, String, String?)] = []
+        if look.cache, !facts.cacheWarm {
+            pairs.append((app.t("Кэш", "Cache"), app.t("после первого ответа", "after the first answer"), nil))
+        }
         if look.cache, facts.cacheWarm {
             if let cold = facts.cacheCold {
                 pairs.append((app.t("Кэш", "Cache"), app.t("тёплый ещё \(minutes(cold.timeIntervalSinceNow)) мин",
@@ -150,9 +166,16 @@ enum ContextCard {
                 pairs.append((app.t("Кэш", "Cache"), app.t("остыл: следующий ход прочтёт всё заново", "cold: the next turn reads it all again"), "warn"))
             }
         }
-        if look.week, let rate = facts.weekPerHour {
-            pairs.append((app.t("Неделя", "Week"), app.t("+\(share(rate))% за последний час", "+\(share(rate))% in the last hour"),
-                          rate >= 0.02 ? "warn" : nil))
+        if look.week {
+            if let rate = facts.weekPerHour {
+                pairs.append((app.t("Неделя", "Week"), app.t("+\(share(rate))% за последний час", "+\(share(rate))% in the last hour"),
+                              rate >= 0.02 ? "warn" : nil))
+            } else {
+                pairs.append((app.t("Неделя", "Week"), app.t("скорость — через 10 мин наблюдения", "its pace in 10 minutes of watching"), nil))
+            }
+        }
+        if look.cost, (facts.costUSD ?? 0) <= 0, facts.wallMs <= 0 {
+            pairs.append((app.t("Сессия", "Session"), app.t("после первого хода", "after the first turn"), nil))
         }
         if look.cost, (facts.costUSD ?? 0) > 0 || facts.wallMs > 0 {
             var said = facts.costUSD.flatMap { $0 > 0 ? money($0) : nil } ?? ""
@@ -168,6 +191,7 @@ enum ContextCard {
         }
         if look.account, let account = facts.account {
             var said = account
+            if facts.week == nil { said += app.t(" · лимит — после хода", " · its limit after a turn") }
             if let week = facts.week {
                 said += app.t(" · неделя \(Int((week.used * 100).rounded()))%", " · week \(Int((week.used * 100).rounded()))%")
                 // A week resets within a week: anything further is a misreading.

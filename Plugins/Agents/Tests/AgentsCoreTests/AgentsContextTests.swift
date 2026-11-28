@@ -59,6 +59,64 @@ struct AgentsContextTests {
         #expect(track.heavy.isEmpty, "what took the most was compacted away")
     }
 
+    @Test("a continued session's track from its transcript: turns, the line, what took the most, a compaction, the cache")
+    func rebuilt() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("transcript-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: file) }
+        func usage(_ read: Int, _ out: Int) -> String {
+            #"{"input_tokens":2,"cache_read_input_tokens":\#(read),"cache_creation_input_tokens":100,"output_tokens":\#(out),"cache_creation":{"ephemeral_1h_input_tokens":100,"ephemeral_5m_input_tokens":0}}"#
+        }
+        let now = Date()
+        let stamp = { (minutes: Double) in
+            let format = ISO8601DateFormatter()
+            format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return format.string(from: now.addingTimeInterval(minutes * 60))
+        }
+        let lines = [
+            #"{"type":"user","timestamp":"\#(stamp(-50))","message":{"role":"user","content":"look at the log"}}"#,
+            #"{"type":"assistant","timestamp":"\#(stamp(-49))","message":{"usage":\#(usage(20_000, 100)),"content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/tmp/agents.log"}}]}}"#,
+            #"{"type":"user","timestamp":"\#(stamp(-49))","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"..."}]}}"#,
+            #"{"type":"assistant","timestamp":"\#(stamp(-48))","message":{"usage":\#(usage(60_000, 300)),"content":[{"type":"text","text":"it says…"}]}}"#,
+            #"{"type":"assistant","isSidechain":true,"timestamp":"\#(stamp(-47))","message":{"usage":\#(usage(900_000, 1)),"content":[]}}"#,
+            #"{"type":"user","timestamp":"\#(stamp(-40))","message":{"role":"user","content":"and now?"}}"#,
+            #"{"type":"assistant","timestamp":"\#(stamp(-39))","message":{"usage":\#(usage(70_000, 200)),"content":[{"type":"text","text":"now…"}]}}"#,
+            #"{"type":"system","subtype":"compact_boundary","timestamp":"\#(stamp(-30))","compactMetadata":{"trigger":"manual","preTokens":70300}}"#,
+            #"{"type":"user","timestamp":"\#(stamp(-29))","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued…"}}"#,
+            #"{"type":"user","timestamp":"\#(stamp(-20))","message":{"role":"user","content":"go on"}}"#,
+            #"{"type":"assistant","timestamp":"\#(stamp(-19))","message":{"usage":\#(usage(9_000, 100)),"content":[{"type":"text","text":"on it"}]}}"#,
+        ]
+        try (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
+        // Before the compaction: what the Read added.
+        try (lines.prefix(7).joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
+        let before = ContextTrack.rebuilt(from: file)
+        #expect(before.heavy.first?.label.hasPrefix("Read") == true, "\(before.heavy)")
+        #expect(before.heavy.first?.tokens == 60_102 - 20_102 - 100)
+        try (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
+        let track = ContextTrack.rebuilt(from: file)
+        #expect(track.points.filter { !$0.compacted }.count == 2, "two turns ended before the last words: \(track.points)")
+        #expect(track.heavy.isEmpty, "what took the most was compacted away")
+        #expect(track.compactions.count == 1)
+        #expect(track.compactions.first?.fromTokens == 70_300)
+        #expect(track.compactions.first?.toTokens == 9_102)
+        #expect(track.tokens == 9_202, "the last call: its prompt and its answer")
+        #expect(track.cacheCold(now: now) != nil, "an hour's cache from a call 19 minutes ago")
+        #expect(!track.isEmpty)
+        #expect(ContextTrack.rebuilt(from: file.appendingPathExtension("missing")).isEmpty)
+    }
+
+    @Test("with nothing known yet every part chosen is still there, saying when it will be")
+    func nothingYet() throws {
+        let app = app()
+        let bare = ContextCard.Facts(tokens: 250_000, window: 1_000_000, model: "Opus 5.5", account: "main")
+        let rows = try #require(ContextCard.badge(bare, ContextLook.standard, app)?["details"]?.array)
+        let labels = rows.compactMap { $0["kv"]?[0]?.string }
+        for label in ["How it grew", "To compaction", "Cache", "Week", "Session", "Model", "Account"] {
+            #expect(labels.contains(label), "\(label) missing: \(labels)")
+        }
+        #expect(rows.contains { $0["text"]?.string == "nothing large yet" })
+        #expect(rows.contains { $0["kv"]?[1]?.string == "main · its limit after a turn" })
+    }
+
     func app() -> AgentsApp {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("agents-context-" + UUID().uuidString)
         return AgentsApp(home: home) { _ in }
