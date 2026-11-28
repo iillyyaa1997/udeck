@@ -101,7 +101,7 @@ enum ContextCard {
             bits.append(app.t("кэш \(minutes(cold.timeIntervalSinceNow)) мин", "cache \(minutes(cold.timeIntervalSinceNow)) min"))
         }
         if look.week, let rate = facts.weekPerHour { bits.append(app.t("+\(share(rate))% недели/ч", "+\(share(rate))% of the week/h")) }
-        if look.cost, let cost = facts.costUSD { bits.append(String(format: "$%.2f", cost)) }
+        if look.cost, let cost = facts.costUSD, cost > 0 { bits.append(money(cost)) }
         if look.model, let model = facts.model { bits.append([model, facts.effort].compactMap { $0 }.joined(separator: " ")) }
         if look.account, let account = facts.account {
             bits.append(account + (facts.week.map { app.t(" · неделя \(Int(($0.used * 100).rounded()))%", " · week \(Int(($0.used * 100).rounded()))%") } ?? ""))
@@ -155,7 +155,7 @@ enum ContextCard {
                           rate >= 0.02 ? "warn" : nil))
         }
         if look.cost, (facts.costUSD ?? 0) > 0 || facts.wallMs > 0 {
-            var said = facts.costUSD.flatMap { $0 > 0 ? String(format: "$%.2f", $0) : nil } ?? ""
+            var said = facts.costUSD.flatMap { $0 > 0 ? money($0) : nil } ?? ""
             if facts.wallMs > 0 {
                 let spent = app.t("ходы \(duration(facts.wallMs, app)), модель \(duration(facts.apiMs, app))",
                                   "turns \(duration(facts.wallMs, app)), model \(duration(facts.apiMs, app))")
@@ -261,6 +261,11 @@ enum ContextCard {
         if count >= 10_000 { return "\(Int((Double(count) / 1000).rounded()))k" }
         if count >= 1000 { return String(format: "%.1fk", Double(count) / 1000) }
         return "\(count)"
+    }
+
+    /// A session's cost: a cent and more as it is, less as «<$0.01».
+    static func money(_ cost: Double) -> String {
+        cost < 0.01 ? "<$0.01" : String(format: "$%.2f", cost)
     }
 
     static func pct(_ tokens: Int, _ window: Int) -> Int {
