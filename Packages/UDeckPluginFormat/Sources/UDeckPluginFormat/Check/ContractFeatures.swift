@@ -139,8 +139,8 @@ public enum ContractFeatures {
     /// to 0.9.22 change nothing in it; 0.9.23 brings a feed entry's `files`;
     /// 0.9.24 a badge's `busy` and `shorter`; 0.9.25 an input's `suggest`;
     /// 0.9.26 changes nothing in it, nor does 0.9.27 (its `link` event and the
-    /// feed's tables are the docs'), nor 0.9.28, nor 0.9.29.
-    static let reviewedAt = "0.9.29"
+    /// feed's tables are the docs'), nor 0.9.28 to 0.9.30.
+    static let reviewedAt = "0.9.30"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 

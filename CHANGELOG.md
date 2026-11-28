@@ -8,6 +8,14 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.30] — 2026-11-28
+
+- **The panel opens with shorter stalls.** Every reveal of the whole panel
+  built its cards afresh; they are now built once and kept, hidden, between
+  reveals, laid out at the size the panel opens at. The window's size limits
+  are no longer worked out from the content on every update. In the lab the
+  longest stall of a whole-panel reveal went from 132–188 ms to 66–149 ms.
+
 ## [0.9.29] — 2026-11-27
 
 - **Resting the pointer on the notch opens the panel.** It listened only to
