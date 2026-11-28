@@ -1237,10 +1237,14 @@ def test_the_sections_the_lab_clicks_carry_their_tag_on_the_outside():
     (`_open_the_about_pane` waits for `updates.checkNow`, which only About has), and every
     `plugins.*` check that opens Settings → Plugins (`ui.plugins_pane`)."""
     view = (Path(__file__).resolve().parents[2] / "Sources" / "UDeckKit" / "Views" / "SettingsView.swift").read_text()
-    row = view[view.index("List(Section.allCases, selection: $navigation.section)"):]
+    # Since 0.9.34 a section's row is built by `sectionRow`, and each installed plugin's in the list itself.
+    row = view[view.index("private func sectionRow(_ item: Section)"):]
     row = row[:row.index(".accessibilityIdentifier(\"section.")]
     # Since the redesign the row is a view of its own and carries no `.badge`; the tag is still the last word on it.
-    assert "SidebarRow(" in row and row.rindex(".tag(item)") > row.rindex("SidebarRow(") and ".badge(" not in row
+    assert "SidebarRow(" in row and row.rindex(".tag(SidebarItem.section(item))") > row.rindex("SidebarRow(") and ".badge(" not in row
+    plugin = view[view.index("PluginSidebarRow(name:"):]
+    plugin = plugin[:plugin.index(".accessibilityIdentifier(\"section.plugin.")]
+    assert ".tag(SidebarItem.plugin(entry.id))" in plugin and ".badge(" not in plugin
 
 
 # Preparing a machine that never looked.

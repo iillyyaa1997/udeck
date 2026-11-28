@@ -90,25 +90,26 @@ public struct SettingsView: View {
         // back to them — so it is removed rather than fixed, and the column
         // visibility is stated rather than left to be remembered.
         NavigationSplitView(columnVisibility: .constant(.all)) {
-            List(Section.allCases, selection: $navigation.section) { item in
-                // How many plugin updates are waiting, where the operator
-                // looks for the Plugins pane.
-                SidebarRow(
-                    title: model.strings(item.title), symbol: item.symbol, tint: item.tint,
-                    updates: item == .plugins ? model.updatesWaiting : 0, chosen: item == navigation.section
-                )
-                    // On the row itself: a List that finds no tag on its rows
-                    // selects nothing — measured in the lab on 2026-09-28, no
-                    // click on any section changed the pane, with the tag
-                    // under a `.badge`.
-                    .tag(item)
-                    // Identifiers, not titles: every title here is translated,
-                    // and the language is a setting inside this same window, so
-                    // anything driving the screen from outside — the end-to-end
-                    // lab, VoiceOver scripting, a bug report's reproduction —
-                    // would otherwise break the moment the operator switches
-                    // language.
-                    .accessibilityIdentifier("section.\(item)")
+            // The sections, and under «Плагины» the overview and each
+            // installed plugin, its page the window's whole width (the
+            // operator, 11-28: the plugin's list beside its card left its
+            // settings a third of the window).
+            List(selection: sidebarSelection) {
+                SwiftUI.Section {
+                    ForEach([Section.general, .opening, .look]) { sectionRow($0) }
+                }
+                SwiftUI.Section(model.strings(.sectionPlugins)) {
+                    sectionRow(.plugins)
+                    ForEach(model.pluginEntries) { entry in
+                        PluginSidebarRow(name: model.pluginName(entry), id: entry.id,
+                                         trouble: model.listStatus(of: entry.plugin, id: entry.id).isTrouble)
+                            .tag(SidebarItem.plugin(entry.id))
+                            .accessibilityIdentifier("section.plugin.\(entry.id)")
+                    }
+                }
+                SwiftUI.Section {
+                    sectionRow(.about)
+                }
             }
             // Room for the longest Russian name with its icon and the
             // Plugins row's ↑N: measured in the lab (gallery of 2026-11-19),
@@ -130,8 +131,14 @@ public struct SettingsView: View {
             case .opening: OpeningSettings(model: model)
             case .about: AboutSection(model: model, updater: updater)
             case .look: LookSettings(model: model)
-            // Labelled tabs over their pages (PluginsPane.swift).
-            case .plugins: PluginsSettingsPane(model: model, navigation: navigation)
+            // Labelled tabs over their pages (PluginsPane.swift), or a
+            // plugin's own page.
+            case .plugins:
+                if let page = navigation.pluginPage, let entry = model.pluginEntries.first(where: { $0.id == page }) {
+                    PluginPage(model: model, entry: entry).id(entry.id)
+                } else {
+                    PluginsSettingsPane(model: model, navigation: navigation)
+                }
             }
         }
         .frame(minWidth: 900, minHeight: 520)
@@ -145,6 +152,82 @@ public struct SettingsView: View {
         // directly — it did not, and it was the one part of the settings window
         // that stayed in English after the language was changed.
         .environment(\.strings, model.strings)
+        // A plugin's page whose plugin went: the overview.
+        .onChange(of: model.pluginEntries.map(\.id)) { _, ids in
+            if let page = navigation.pluginPage, !ids.contains(page) { navigation.pluginPage = nil }
+        }
+    }
+
+    /// A row of the sidebar: a section, or an installed plugin's page.
+    enum SidebarItem: Hashable {
+        case section(Section)
+        case plugin(String)
+    }
+
+    private var sidebarSelection: Binding<SidebarItem?> {
+        Binding(
+            get: {
+                if navigation.section == .plugins, let page = navigation.pluginPage { return .plugin(page) }
+                return .section(navigation.section)
+            },
+            set: { item in
+                switch item {
+                case .section(let section)?:
+                    navigation.section = section
+                    navigation.pluginPage = nil
+                case .plugin(let id)?:
+                    navigation.section = .plugins
+                    navigation.pluginPage = id
+                    navigation.selectedPlugin = id
+                case nil:
+                    break
+                }
+            }
+        )
+    }
+
+    private func sectionRow(_ item: Section) -> some View {
+        // How many plugin updates are waiting, where the operator looks for
+        // the Plugins pane.
+        SidebarRow(
+            title: model.strings(item == .plugins ? .sectionAllPlugins : item.title), symbol: item.symbol, tint: item.tint,
+            updates: item == .plugins ? model.updatesWaiting : 0,
+            chosen: item == navigation.section && (item != .plugins || navigation.pluginPage == nil)
+        )
+            // On the row itself: a List that finds no tag on its rows
+            // selects nothing — measured in the lab on 2026-09-28, no
+            // click on any section changed the pane, with the tag
+            // under a `.badge`.
+            .tag(SidebarItem.section(item))
+            // Identifiers, not titles: every title here is translated,
+            // and the language is a setting inside this same window, so
+            // anything driving the screen from outside — the end-to-end
+            // lab, VoiceOver scripting, a bug report's reproduction —
+            // would otherwise break the moment the operator switches
+            // language.
+            .accessibilityIdentifier("section.\(item)")
+    }
+}
+
+/// An installed plugin's row in the sidebar: its mark and its name, and an
+/// orange dot when something about it wants a look.
+private struct PluginSidebarRow: View {
+    var name: String
+    var id: String
+    var trouble: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Label {
+                Text(name).lineLimit(1)
+            } icon: {
+                PluginBadge(name: name, id: id, size: 20)
+            }
+            Spacer(minLength: 4)
+            if trouble {
+                Circle().fill(.orange).frame(width: 7, height: 7).accessibilityHidden(true)
+            }
+        }
     }
 }
 

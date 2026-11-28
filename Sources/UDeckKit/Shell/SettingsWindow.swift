@@ -21,6 +21,11 @@ public final class SettingsNavigation {
     /// to another section and back finds the pane as it was left.
     var pluginsTab: PluginsTab = .installed
     var selectedPlugin: String?
+    /// An installed plugin's own page, chosen in the sidebar under «Все
+    /// плагины» (the operator, 11-28: each plugin a row of the sidebar, its
+    /// page the window's whole width) — by its folder's name; nil for the
+    /// overview.
+    var pluginPage: String?
 
     public init() {}
 }

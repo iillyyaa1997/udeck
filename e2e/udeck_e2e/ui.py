@@ -265,6 +265,11 @@ PLUGINS_TAB = "plugins.tab."
 PLUGINS_PAGE = "plugins.page."
 PLUGINS_ROW = "plugins.row."
 PLUGINS_CARD = "plugins.card."
+# Since 0.9.34 each installed plugin is a row of the sidebar, `section.plugin.<id>`,
+# its card a page of its own, and `section.plugins` («Все плагины») the tabs: a
+# plugin's control is reached by its row in the sidebar, any other by the tabs.
+SECTION_PLUGIN = "section.plugin."
+SECTION_PLUGINS = "section.plugins"
 INSTALLED, CATALOGUE, SOURCES, DEVELOPERS = "installed", "catalogue", "sources", "developers"
 
 # How many times a tab or a row is clicked before the lab gives up on it, as for
@@ -306,6 +311,7 @@ def plugins_tab_of(identifier: str) -> str | None:
 def _plugin_of(identifier: str, ids: list[str]) -> str | None:
     """The installed plugin a `plugin.<id>.…` control is of, among the list's rows — the longest id that fits: an id may have dots of its own."""
     rows = [i[len(PLUGINS_ROW):] for i in ids if i.startswith(PLUGINS_ROW)]
+    rows += [i[len(SECTION_PLUGIN):] for i in ids if i.startswith(SECTION_PLUGIN)]
     fits = [row for row in rows if identifier == f"plugin.{row}" or identifier.startswith(f"plugin.{row}.")]
     return max(fits, key=len, default=None)
 
@@ -313,6 +319,14 @@ def _plugin_of(identifier: str, ids: list[str]) -> str | None:
 def _elsewhere(ids: list[str], identifier: str) -> bool:
     """Whether a screen with these identifiers is Settings → Plugins on another tab — or another plugin's card — than the one holding `identifier`."""
     tab = plugins_tab_of(identifier)
+    if tab is not None and any(i.startswith(SECTION_PLUGIN) for i in ids):
+        # Plugins' pages: only while the tabs or a plugin's page show, as before.
+        if not any(i.startswith((PLUGINS_TAB, PLUGINS_CARD)) for i in ids):
+            return False
+        plugin = _plugin_of(identifier, ids) if tab == INSTALLED else None
+        if plugin is not None:
+            return PLUGINS_CARD + plugin not in ids
+        return PLUGINS_PAGE + tab not in ids
     if tab is None or not any(i.startswith(PLUGINS_TAB) for i in ids):
         return False
     if PLUGINS_PAGE + tab not in ids:
@@ -337,6 +351,16 @@ def _show(machine: Any, identifier: str, step: str, window: str, found: list[ax.
     if not _elsewhere(ids, identifier):
         return None
     tab = plugins_tab_of(identifier)
+    if any(i.startswith(SECTION_PLUGIN) for i in ids):
+        plugin = _plugin_of(identifier, ids) if tab == INSTALLED else None
+        if plugin is not None:
+            return _choose(machine, SECTION_PLUGIN + plugin, PLUGINS_CARD + plugin, f"{step}: {plugin}'s page", window)
+        if not any(i.startswith(PLUGINS_TAB) for i in ids):
+            found = _choose(machine, SECTION_PLUGINS, PLUGINS_TAB + tab, f"{step}: all plugins", window)
+            ids = [e.identifier for e in found if e.identifier]
+        if PLUGINS_PAGE + tab not in ids:
+            found = _choose(machine, PLUGINS_TAB + tab, PLUGINS_PAGE + tab, f"{step}: the {tab} tab", window)
+        return found
     if PLUGINS_PAGE + tab not in ids:
         found = _choose(machine, PLUGINS_TAB + tab, PLUGINS_PAGE + tab, f"{step}: the {tab} tab", window)
         ids = [e.identifier for e in found if e.identifier]
@@ -374,7 +398,7 @@ def reach(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDO
 
 def plugins_pane_shown(ids: list[str]) -> bool:
     """Whether a walk with these identifiers is of Settings → Plugins: its tabs — or, in a release from before them, its catalogue's switch."""
-    return any(i.startswith(PLUGINS_TAB) for i in ids) or "catalogue.enabled" in ids
+    return any(i.startswith((PLUGINS_TAB, PLUGINS_CARD)) for i in ids) or "catalogue.enabled" in ids
 
 
 def wait_for_plugins_pane(machine: Any, step: str, window: str = SETTINGS_WINDOW,

@@ -953,6 +953,49 @@ def test_a_tab_that_never_shows_its_page_is_the_labs_failure():
     assert len(machine.clicks) == ui.TAB_CLICKS
 
 
+# 0.9.34: each installed plugin a row of the sidebar and a page of its own, the
+# tabs under «Все плагины» (`section.plugins`).
+SIDEBAR = [
+    "3|AXRow||section.plugins||||800;300;|180;24;",
+    "3|AXRow||section.plugin.uptime||||800;330;|180;24;",
+    "3|AXRow||section.plugin.team.clock||||800;360;|180;24;",
+]
+ALL_PLUGINS = "\n".join(["0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;", *SIDEBAR, *TABS,
+    "6|AXStaticText||plugins.page.installed||What is installed||1000;290;|300;16;",
+    "7|AXButton||plugins.row.uptime||||1000;330;|240;60;",
+])  # fmt: skip
+UPTIME_PAGE = "\n".join(["0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;", *SIDEBAR,
+    "7|AXStaticText||plugins.card.uptime||Uptime||1000;230;|100;20;",
+    "7|AXButton||plugin.uptime.remove||||1500;600;|60;20;",
+])  # fmt: skip
+CLOCK_PAGE = UPTIME_PAGE.replace("plugins.card.uptime||Uptime", "plugins.card.team.clock||team-clock").replace(
+    "plugin.uptime.remove", "plugin.team.clock.remove")
+PAGES_CATALOGUE = CATALOGUE_PAGE.replace("|980;648;", "|980;648;\n" + "\n".join(SIDEBAR), 1)
+
+
+def test_a_plugins_control_is_found_on_its_page_by_its_row_in_the_sidebar():
+    machine = FakeMachine(walks=[UPTIME_PAGE, UPTIME_PAGE, CLOCK_PAGE])
+    found = ui.find(machine, "plugin.team.clock.remove", "reading team-clock's Remove")
+    assert found is not None and found.identifier == "plugin.team.clock.remove"
+    # team-clock's row in the sidebar, in its middle.
+    assert machine.clicks == [(890, 372)]
+
+
+def test_from_a_plugins_page_another_tabs_control_is_found_through_all_plugins():
+    machine = FakeMachine(walks=[UPTIME_PAGE, UPTIME_PAGE, ALL_PLUGINS, ALL_PLUGINS, PAGES_CATALOGUE])
+    found = ui.find(machine, "catalogue.uptime.state", "reading uptime's catalogue row")
+    assert found is not None and found.identifier == "catalogue.uptime.state"
+    # «Все плагины», then the Catalogue tab.
+    assert machine.clicks == [(890, 312), (1080, 265)]
+
+
+def test_a_plugins_own_control_on_its_page_needs_no_click():
+    machine = FakeMachine(walks=[UPTIME_PAGE])
+    assert ui.find(machine, "plugin.uptime.remove", "finding Remove").identifier == "plugin.uptime.remove"
+    assert machine.clicks == []
+    ui.wait_for_plugins_pane(machine, "a plugin's page is the plugins' pane too")
+
+
 def test_a_source_on_a_host_with_plugin_in_its_name_keeps_its_own_controls_on_sources():
     sid = "gitlab.plugin.example-tools-1a2b3c4d"
     assert ui.plugins_tab_of(f"source.{sid}.trust") == ui.SOURCES

@@ -231,6 +231,15 @@ public enum Phrase: Sendable, Equatable {
     case pluginSettings
     /// The tab of a plugin's settings that belong to none of its groups.
     case pluginSettingsGeneral
+    /// The sidebar's row for the overview of plugins, above each installed one.
+    case sectionAllPlugins
+    /// The part of a plugin's page under its settings: what it is, where it
+    /// came from, its versions, its last run.
+    case pluginAboutPart
+    /// The «⋯» button on a plugin's page.
+    case pluginMoreActions
+    /// A tile's button that opens the plugin's page.
+    case pluginOpenPage
     /// Above the card a plugin draws beside a group of its settings.
     case pluginSettingsPreview
     /// Where that card is while the plugin is not running.

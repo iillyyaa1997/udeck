@@ -12,6 +12,14 @@ struct PluginSettingsView: View {
     @Environment(\.strings) private var strings
     @State private var chosen = ""
     @State private var previewShell = ShellState()
+    /// Where the settings and the sample are in the page's scroll view, and
+    /// how tall the sample is: what keeps it in sight while they scroll.
+    @State private var placed = CGRect.zero
+    @State private var sampleHeight: CGFloat = 0
+
+    /// The sample's width, and the least the settings keep beside it.
+    static let sampleWidth: CGFloat = 320
+    private let layout = BesideOrUnder(leastLeading: 340)
 
     /// The tabs: «General» for settings in no group, when there are any, then
     /// the plugin's groups in its order.
@@ -43,10 +51,13 @@ struct PluginSettingsView: View {
                 // them where it is not: side by side in a narrow window it
                 // pushed the whole page past the window's left edge (the
                 // operator's Mac, 11-28: «Все сломалось»).
-                BesideOrUnder {
+                layout {
                     controls
                     preview(previewing)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { sampleHeight = $0 }
+                        .offset(y: pinned)
                 }
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(PluginPage.space)) } action: { placed = $0 }
             } else {
                 controls
             }
@@ -54,6 +65,14 @@ struct PluginSettingsView: View {
         .onAppear(perform: announce)
         .onChange(of: current) { announce() }
         .onDisappear { model.showSettingsPreview(manifest.id, group: nil) }
+    }
+
+    /// How far the sample is moved down to stay in sight while the settings
+    /// beside it scroll up (11-28: «образец всегда на виду»): never above where
+    /// it stands, never past the settings' end — and not at all under them.
+    private var pinned: CGFloat {
+        guard layout.beside(placed.width, trailing: Self.sampleWidth) else { return 0 }
+        return min(max(0, 12 - placed.minY), max(0, placed.height - sampleHeight))
     }
 
     private func announce() {
@@ -65,17 +84,96 @@ struct PluginSettingsView: View {
     /// key is reported as a problem, and must still render rather than
     /// collapsing two rows into one.
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(manifest.settings.enumerated()).filter { ($0.element.group ?? "") == current }, id: \.offset) { _, declaration in
-                if let section = declaration.section, !section.isEmpty {
-                    Text(section)
-                        .font(.caption.weight(.semibold))
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Self.blocks(of: manifest.settings, in: current)) { block in
+                if let title = block.title {
+                    Text(title.uppercased())
+                        .font(.caption2.weight(.semibold))
+                        .tracking(0.5)
                         .foregroundStyle(.secondary)
-                        .padding(.top, 6)
+                        .padding(.top, block.id == 0 ? 0 : 8)
+                        .padding(.leading, 2)
                 }
-                PluginSettingControl(declaration: declaration, id: manifest.id, model: model)
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(block.rows) { row in
+                        if let second = row.second {
+                            HStack(alignment: .top, spacing: 14) {
+                                control(row.first).frame(maxWidth: .infinity, alignment: .leading)
+                                control(second).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        } else if row.half {
+                            HStack(alignment: .top, spacing: 14) {
+                                control(row.first).frame(maxWidth: .infinity, alignment: .leading)
+                                Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
+                            }
+                        } else {
+                            control(row.first)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 9).fill(Color(nsColor: .controlBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6)))
             }
         }
+    }
+
+    private func control(_ declaration: SettingDeclaration) -> some View {
+        PluginSettingControl(declaration: declaration, id: manifest.id, model: model)
+    }
+
+    /// A box of settings under a heading, and its rows.
+    struct Block: Identifiable {
+        let id: Int
+        let title: String?
+        var rows: [Row]
+    }
+
+    /// One setting, or two short switches side by side (`half`: one such
+    /// switch left alone at a box's end, as wide as it would be beside another).
+    struct Row: Identifiable {
+        let id: Int
+        let first: SettingDeclaration
+        var second: SettingDeclaration?
+        var half = false
+    }
+
+    /// The settings of `group` in boxes, a new one at each heading; switches
+    /// whose label is short go two to a row (11-28: ten switches one under
+    /// another took the window's height).
+    static func blocks(of settings: [SettingDeclaration], in group: String) -> [Block] {
+        var blocks: [Block] = []
+        var pending: SettingDeclaration?
+        var pendingID = 0
+        func flush() {
+            guard let waiting = pending, !blocks.isEmpty else { return }
+            blocks[blocks.count - 1].rows.append(Row(id: pendingID, first: waiting, half: true))
+            pending = nil
+        }
+        for (offset, declaration) in settings.enumerated() where (declaration.group ?? "") == group {
+            let heading = declaration.section.flatMap { $0.isEmpty ? nil : $0 }
+            if heading != nil || blocks.isEmpty {
+                flush()
+                blocks.append(Block(id: blocks.count, title: heading, rows: []))
+            }
+            let short = declaration.type == .bool && declaration.label.count <= 30
+            if short {
+                if let waiting = pending {
+                    blocks[blocks.count - 1].rows.append(Row(id: pendingID, first: waiting, second: declaration))
+                    pending = nil
+                } else {
+                    pending = declaration
+                    pendingID = offset
+                }
+            } else {
+                flush()
+                blocks[blocks.count - 1].rows.append(Row(id: offset, first: declaration))
+            }
+        }
+        flush()
+        return blocks
     }
 
     /// The card the plugin drew for the group, drawn as on the deck and not
@@ -93,7 +191,7 @@ struct PluginSettingsView: View {
                                                             note: nil, lastSpokeAt: nil),
                              theme: theme, pluginID: manifest.id, model: model, shell: previewShell)
                     .padding(theme.windowPadding)
-                    .frame(width: 340, alignment: .top)
+                    .frame(width: Self.sampleWidth, alignment: .top)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxHeight: 720, alignment: .top)
                     .background(RoundedRectangle(cornerRadius: theme.windowCornerRadius).fill(theme.windowFill))
@@ -107,11 +205,11 @@ struct PluginSettingsView: View {
                 Text(strings(.pluginSettingsPreviewWaits))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(width: 340, height: 120)
+                    .frame(width: Self.sampleWidth, height: 120)
                     .background(RoundedRectangle(cornerRadius: 10).strokeBorder(.secondary.opacity(0.3)))
             }
         }
-        .frame(width: 340)
+        .frame(width: Self.sampleWidth)
     }
 }
 

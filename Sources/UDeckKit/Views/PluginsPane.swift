@@ -154,7 +154,7 @@ struct PluginsSettingsPane: View {
 
     @ViewBuilder private var page: some View {
         switch navigation.pluginsTab {
-        case .installed: InstalledPluginsPage(model: model, selected: $navigation.selectedPlugin)
+        case .installed: InstalledPluginsPage(model: model, navigation: navigation)
         case .catalogue: CataloguePage(model: model)
         case .sources: SourcesPage(model: model, linkSheetOpen: $linkSheetOpen, linkText: $linkText)
         case .developers: DevelopersPage(model: model)
@@ -247,51 +247,53 @@ struct PluginBadge: View {
 
 // MARK: - Installed
 
-/// What is installed: the list on the left — each plugin's name and the one
-/// thing about it worth a glance (`PluginListStatus`) — and the chosen one's
-/// card beside it; the plugins folder and the cards' lifetime under them.
+/// An installed plugin, by its folder's name: one on disk, or one installed
+/// through uDeck whose folder has gone (`plugin` nil), which its page offers
+/// to put back. A row of the sidebar and a page each (11-28).
+struct PluginEntry: Identifiable, Equatable {
+    var id: String
+    var plugin: DiscoveredPlugin?
+
+    static func == (lhs: PluginEntry, rhs: PluginEntry) -> Bool {
+        lhs.id == rhs.id && lhs.plugin?.directory == rhs.plugin?.directory
+    }
+}
+
+extension DeckModel {
+    /// Every installed plugin: those on disk, then those whose folder has gone.
+    var pluginEntries: [PluginEntry] {
+        let missing = installed.plugins.keys.filter { !folderExists($0) }.sorted()
+        return plugins.map { PluginEntry(id: $0.folderName, plugin: $0) } + missing.map { PluginEntry(id: $0, plugin: nil) }
+    }
+
+    /// The name a plugin goes by: its manifest's, else its folder's.
+    func pluginName(_ entry: PluginEntry) -> String {
+        entry.plugin.map { displayManifest(for: $0)?.name ?? $0.folderName } ?? entry.id
+    }
+}
+
+/// What is installed: a tile for each plugin — its name, what it is, the one
+/// thing about it worth a glance (`PluginListStatus`) — opening its page,
+/// which is also a row of the sidebar (11-28); the plugins folder and the
+/// cards' lifetime under them.
 struct InstalledPluginsPage: View {
     @Bindable var model: DeckModel
-    /// The plugin the card shows, by its folder's name: the first one until
-    /// another is chosen, or when the chosen one is gone.
-    @Binding var selected: String?
+    @Bindable var navigation: SettingsNavigation
     @Environment(\.strings) private var strings
-
-    /// A line of the list: a plugin on disk, or one installed through uDeck
-    /// whose folder has gone (`plugin` nil), which can be put back from its card.
-    private struct Entry: Identifiable {
-        var id: String
-        var plugin: DiscoveredPlugin?
-    }
-
-    private var entries: [Entry] {
-        model.plugins.map { Entry(id: $0.folderName, plugin: $0) } + missingIDs.map { Entry(id: $0, plugin: nil) }
-    }
-
-    private var missingIDs: [String] {
-        model.installed.plugins.keys.filter { !model.folderExists($0) }.sorted()
-    }
-
-    private var current: Entry? {
-        let all = entries
-        return all.first { $0.id == selected } ?? all.first
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Only when there is no line at all: a plugin whose folder has gone
-            // has one, and its card says it can be put back.
-            if PluginsPane.saysNothingInstalled(folders: model.plugins.count, missing: missingIDs.count) {
+            // has one, and its page says it can be put back.
+            let entries = model.pluginEntries
+            if PluginsPane.saysNothingInstalled(folders: model.plugins.count, missing: entries.count - model.plugins.count) {
                 Text(strings(.pluginsNothingInstalled))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("plugins.nothingInstalled")
             } else {
-                HStack(alignment: .top, spacing: 12) {
-                    list
-                        .frame(width: 230)
-                    card
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {
+                    ForEach(entries) { tile($0) }
                 }
             }
 
@@ -316,62 +318,84 @@ struct InstalledPluginsPage: View {
         }
     }
 
-    private var list: some View {
-        let all = entries
-        let chosen = current?.id
-        return VStack(spacing: 0) {
-            ForEach(Array(all.enumerated()), id: \.element.id) { index, entry in
-                if index > 0 { Divider() }
-                row(entry, chosen: entry.id == chosen)
-            }
-        }
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6)))
-    }
-
-    private func row(_ entry: Entry, chosen: Bool) -> some View {
-        let name = entry.plugin.map { model.displayManifest(for: $0)?.name ?? $0.folderName } ?? entry.id
+    private func tile(_ entry: PluginEntry) -> some View {
+        let name = model.pluginName(entry)
         let status = model.listStatus(of: entry.plugin, id: entry.id)
+        let manifest = entry.plugin.flatMap { model.displayManifest(for: $0) }
         return Button {
-            selected = entry.id
+            navigation.selectedPlugin = entry.id
+            navigation.pluginPage = entry.id
         } label: {
-            HStack(spacing: 10) {
-                PluginBadge(name: name, id: entry.id, size: 26)
-                VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 9) {
+                    PluginBadge(name: name, id: entry.id, size: 28)
                     Text(name)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 13.5, weight: .semibold))
                         .lineLimit(1)
-                    Text(strings(status.phrase))
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
                         .font(.caption)
-                        .foregroundStyle(status.isTrouble ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                        .lineLimit(1)
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer(minLength: 0)
+                if let description = manifest?.description {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                HStack(spacing: 4) {
+                    Text(strings(status.phrase))
+                        .foregroundStyle(status.isTrouble ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    if let manifest {
+                        Text("· \(manifest.version)").foregroundStyle(.secondary)
+                    }
+                }
+                .font(.caption)
+                .lineLimit(1)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(chosen ? Color.accentColor.opacity(0.14) : Color.clear)
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 11).fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(name), \(strings(status.phrase))")
-        .accessibilityAddTraits(chosen ? .isSelected : [])
         .accessibilityIdentifier("plugins.row.\(entry.id)")
     }
+}
 
-    @ViewBuilder private var card: some View {
-        if let entry = current {
-            Group {
-                if let plugin = entry.plugin {
-                    InstalledPluginCard(model: model, plugin: plugin)
-                } else {
-                    MissingPluginCard(model: model, id: entry.id)
+/// An installed plugin's own page (11-28): the window's whole width, its
+/// head in two lines, its settings, and what it is and where it came from
+/// under them. One scroll view, named, so that the sample beside the settings
+/// can stay in sight while they scroll (`PluginSettingsView`).
+struct PluginPage: View {
+    @Bindable var model: DeckModel
+    var entry: PluginEntry
+
+    static let space = "plugin.page"
+    static let aboutAnchor = "plugin.page.about"
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                Group {
+                    if let plugin = entry.plugin {
+                        InstalledPluginCard(model: model, plugin: plugin) {
+                            withAnimation { proxy.scrollTo(Self.aboutAnchor, anchor: .top) }
+                        }
+                    } else {
+                        MissingPluginCard(model: model, id: entry.id)
+                    }
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+                // Room under the last row, as the Plugins pane has.
+                .padding(.bottom, 28)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            // A card of its own for each plugin: a warning up on one is not
-            // carried to the next.
-            .id(entry.id)
+            .coordinateSpace(name: Self.space)
         }
     }
 }
@@ -385,11 +409,16 @@ struct InstalledPluginCard: View {
     /// asking for nothing more runs without asking (`PluginGrant.trustsUpdates`).
     @State private var trustOnAllow: Bool?
     var plugin: DiscoveredPlugin
+    /// Scrolls the page to «О плагине» — the «⋯» menu's way there.
+    var showAbout: () -> Void = {}
     @Environment(\.strings) private var strings
 
+    /// Its page (11-28): the head in two lines, what it asks for in one once
+    /// somebody has decided, its settings, and what it is, where it came
+    /// from, its versions and its last run under them, as «О плагине».
     var body: some View {
         let manifest = model.displayManifest(for: plugin)
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             header(manifest)
 
             if !plugin.problems.isEmpty {
@@ -407,35 +436,65 @@ struct InstalledPluginCard: View {
                 permissions(manifest)
             }
 
-            InstalledRepositoryControls(model: model, id: plugin.folderName, versionOnDisk: plugin.manifest?.version,
-                                        reveal: { model.revealPlugin(plugin) }) {
-                if let manifest {
-                    details(manifest)
-                }
+            if let manifest, !manifest.settings.isEmpty {
+                PluginSettingsView(manifest: manifest, model: model)
             }
-        }
-        .lookCard()
-    }
 
-    private func header(_ manifest: PluginManifest?) -> some View {
-        let name = manifest?.name ?? plugin.folderName
-        return HStack(alignment: .top, spacing: 12) {
-            PluginBadge(name: name, id: plugin.folderName, size: 40)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(.system(size: 16, weight: .bold))
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("plugins.card.\(plugin.folderName)")
+            VStack(alignment: .leading, spacing: 8) {
+                Text(strings(.pluginAboutPart))
+                    .font(.headline)
+                    .id(PluginPage.aboutAnchor)
                 if let description = manifest?.description {
                     Text(description)
                         .font(.callout)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(subtitle(manifest))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                InstalledRepositoryControls(model: model, id: plugin.folderName, versionOnDisk: plugin.manifest?.version,
+                                            reveal: { model.revealPlugin(plugin) }) {
+                    if let manifest {
+                        details(manifest)
+                    }
+                }
+                .lookCard()
+            }
+            .padding(.top, 6)
+        }
+    }
+
+    /// Its mark, its name, and in one line what it is and how it is; the
+    /// «⋯» menu and the switch at the right.
+    private func header(_ manifest: PluginManifest?) -> some View {
+        let name = manifest?.name ?? plugin.folderName
+        let status = model.listStatus(of: plugin, id: plugin.folderName)
+        return HStack(alignment: .center, spacing: 10) {
+            PluginBadge(name: name, id: plugin.folderName, size: 34)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name)
+                    .font(.system(size: 17, weight: .bold))
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("plugins.card.\(plugin.folderName)")
+                HStack(spacing: 4) {
+                    Text(subtitle(manifest)).foregroundStyle(.secondary)
+                    Text("·").foregroundStyle(.secondary)
+                    Text(strings(status.phrase))
+                        .foregroundStyle(status.isTrouble ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                }
+                .font(.caption)
+                .lineLimit(1)
             }
             Spacer(minLength: 8)
+            Menu {
+                Button(strings(.pluginShowInFinder)) { model.revealPlugin(plugin) }
+                Button(strings(.pluginAboutPart)) { showAbout() }
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(strings(.pluginMoreActions))
+            .accessibilityLabel(strings(.pluginMoreActions))
+            .accessibilityIdentifier("plugin.\(plugin.folderName).actions")
             if let manifest = plugin.manifest {
                 Toggle(strings(.pluginEnabled), isOn: Binding(
                     get: { model.pluginSettings.isEnabled(manifest.id) },
@@ -463,13 +522,6 @@ struct InstalledPluginCard: View {
     /// its own settings, its last run, and where its files are.
     @ViewBuilder
     private func details(_ manifest: PluginManifest) -> some View {
-        if !manifest.settings.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(strings(.pluginSettings)).font(.subheadline.weight(.semibold))
-                PluginSettingsView(manifest: manifest, model: model)
-            }
-        }
-
         let snapshot = model.snapshot(for: manifest.id)
         if let run = snapshot.lastRun {
             lastRun(run, of: manifest.id)
@@ -570,6 +622,34 @@ struct InstalledPluginCard: View {
             Text(strings(.permissionsAsksNothing))
                 .font(.caption).foregroundStyle(.secondary)
                 .accessibilityIdentifier("plugin.\(manifest.id).asksNothing")
+        } else if !undecided {
+            // Decided: one line — what it asks for, each granted or not, and
+            // the buttons and the trust beside it (11-28: the box took half
+            // the window before the settings).
+            FlowRow(spacing: 8) {
+                Text(strings(.permissionsAsksTo)).font(.caption.weight(.semibold))
+                ForEach(Array(requested.enumerated()), id: \.offset) { _, capability in
+                    HStack(spacing: 4) {
+                        Image(systemName: granted(capability, manifest) ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(granted(capability, manifest) ? .green : .secondary)
+                        Text(strings(capability.summaryPhrase)).font(.caption)
+                    }
+                    .help(capability.processEnforcement == .declaredOnly ? strings(.permissionsDeclaredHelp) : "")
+                }
+                let tree = model.consentTree(for: manifest.id)
+                let shownSource = model.requiredSource(for: manifest.id)
+                allowButton(prominent: false) {
+                    model.decidePermissions(for: manifest.id, allow: true, shown: requested, shownTree: tree, shownSource: shownSource,
+                                            trustUpdates: model.trustsUpdates(of: manifest.id))
+                }
+                .controlSize(.small)
+                Button(strings(.actionDecline)) {
+                    model.decidePermissions(for: manifest.id, allow: false, shown: requested, shownTree: tree, shownSource: shownSource)
+                }
+                .controlSize(.small)
+                trustSwitch(manifest, undecided: false)
+            }
+            .permissionsBox(undecided: false)
         } else {
             VStack(alignment: .leading, spacing: 3) {
                 Text(strings(.permissionsAsksTo)).font(.subheadline.weight(.semibold))
