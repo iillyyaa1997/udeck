@@ -89,7 +89,9 @@ struct PluginSettingsView: View {
                                                             note: nil, lastSpokeAt: nil),
                              theme: theme, pluginID: manifest.id, model: model, shell: previewShell)
                     .padding(theme.windowPadding)
-                    .frame(width: 340, height: 400, alignment: .top)
+                    .frame(width: 340, alignment: .top)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxHeight: 720, alignment: .top)
                     .background(RoundedRectangle(cornerRadius: theme.windowCornerRadius).fill(theme.windowFill))
                     .background(RoundedRectangle(cornerRadius: theme.windowCornerRadius).fill(theme.backing))
                     .overlay(RoundedRectangle(cornerRadius: theme.windowCornerRadius).strokeBorder(theme.line))
@@ -115,6 +117,9 @@ struct PluginSettingControl: View {
     let id: PluginIdentifier
     @Bindable var model: DeckModel
 
+    /// `plugin.<id>.setting.<key>`: what the lab and VoiceOver find it by.
+    private var identifier: String { "plugin.\(id.rawValue).setting.\(declaration.key)" }
+
     @ViewBuilder
     var body: some View {
         let value = model.pluginSettings.value(of: declaration, for: id)
@@ -126,6 +131,7 @@ struct PluginSettingControl: View {
                 set: { model.setSetting(.bool($0), key: declaration.key, for: id) }
             ))
             .help(declaration.help ?? "")
+            .accessibilityIdentifier(identifier)
 
         case .int:
             // The bounds come from a plugin's manifest, so they cannot be
@@ -147,6 +153,7 @@ struct PluginSettingControl: View {
                 ) {
                     Text(String(describing: value.jsonLiteral))
                 }
+                .accessibilityIdentifier(identifier)
             }
             .help(declaration.help ?? "")
 
@@ -157,6 +164,7 @@ struct PluginSettingControl: View {
                     set: { model.setSetting(.string($0), key: declaration.key, for: id) }
                 ))
                 .frame(width: 240)
+                .accessibilityIdentifier(identifier)
             }
             .help(declaration.help ?? "")
 
@@ -172,6 +180,7 @@ struct PluginSettingControl: View {
                 }
                 .labelsHidden()
                 .frame(width: 240)
+                .accessibilityIdentifier(identifier)
             }
             .help(declaration.help ?? "")
         }

@@ -154,6 +154,17 @@ def think(seconds):
          "session_id": SESSION})
 
 
+PROMPT = 20000
+
+
+def call_usage(output):
+    """A call's tokens, as claude 2.1.332 says them with each answer: the prompt grows by what came in between."""
+    global PROMPT
+    PROMPT += 3000
+    return {"input_tokens": 2, "cache_read_input_tokens": PROMPT - 500, "cache_creation_input_tokens": 498,
+            "output_tokens": output, "cache_creation": {"ephemeral_1h_input_tokens": 498, "ephemeral_5m_input_tokens": 0}}
+
+
 def say(text):
     """The answer streamed word by word, then whole — as with --include-partial-messages."""
     words = text.split(" ")
@@ -165,7 +176,8 @@ def say(text):
              "delta": {"type": "text_delta", "text": piece}}, "parent_tool_use_id": None, "session_id": SESSION})
         time.sleep(DELAY)
     out({"type": "assistant", "message": {"id": "msg-%d" % time.time_ns(), "model": "claude-fake-1-0", "role": "assistant",
-         "content": [{"type": "text", "text": text}]}, "parent_tool_use_id": None, "session_id": SESSION})
+         "content": [{"type": "text", "text": text}], "usage": call_usage(len(words) * 2)}, "parent_tool_use_id": None,
+         "session_id": SESSION})
     tokens(len(words) * 2)
 
 
@@ -174,7 +186,7 @@ def tool_call(tool_id, name, tool_input):
          "content_block": {"type": "tool_use", "id": tool_id, "name": name, "input": {}}},
          "parent_tool_use_id": None, "session_id": SESSION})
     out({"type": "assistant", "message": {"id": "msg-%d" % time.time_ns(), "model": "claude-fake-1-0", "role": "assistant",
-         "content": [{"type": "tool_use", "id": tool_id, "name": name, "input": tool_input}]},
+         "content": [{"type": "tool_use", "id": tool_id, "name": name, "input": tool_input}], "usage": call_usage(40)},
          "parent_tool_use_id": None, "session_id": SESSION})
 
 

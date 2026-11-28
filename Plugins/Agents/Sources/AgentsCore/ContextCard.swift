@@ -154,8 +154,8 @@ enum ContextCard {
             pairs.append((app.t("Неделя", "Week"), app.t("+\(share(rate))% за последний час", "+\(share(rate))% in the last hour"),
                           rate >= 0.02 ? "warn" : nil))
         }
-        if look.cost, facts.costUSD != nil || facts.wallMs > 0 {
-            var said = facts.costUSD.map { String(format: "$%.2f", $0) } ?? ""
+        if look.cost, (facts.costUSD ?? 0) > 0 || facts.wallMs > 0 {
+            var said = facts.costUSD.flatMap { $0 > 0 ? String(format: "$%.2f", $0) : nil } ?? ""
             if facts.wallMs > 0 {
                 let spent = app.t("ходы \(duration(facts.wallMs, app)), модель \(duration(facts.apiMs, app))",
                                   "turns \(duration(facts.wallMs, app)), model \(duration(facts.apiMs, app))")
@@ -170,7 +170,10 @@ enum ContextCard {
             var said = account
             if let week = facts.week {
                 said += app.t(" · неделя \(Int((week.used * 100).rounded()))%", " · week \(Int((week.used * 100).rounded()))%")
-                if let reset = week.resetsAt, reset > Date() { said += app.t(", сброс через ", ", resets in ") + until(reset, app) }
+                // A week resets within a week: anything further is a misreading.
+                if let reset = week.resetsAt, reset > Date(), reset.timeIntervalSinceNow < 8 * 86_400 {
+                    said += app.t(", сброс через ", ", resets in ") + until(reset, app)
+                }
             }
             pairs.append((app.t("Аккаунт", "Account"), said, (facts.week?.used ?? 0) >= 0.9 ? "crit" : nil))
         }
@@ -187,9 +190,10 @@ enum ContextCard {
             if !said.isEmpty { rows.append(["text": .string(said)]) }
         }
         var buttons: [JSONValue] = []
-        if look.compactNow { buttons.append(["button": ["id": "ctx:compact", "label": .string(app.t("Сжать сейчас", "Compact now"))]]) }
-        if look.compactHint { buttons.append(["button": ["id": "ctx:hint", "label": .string(app.t("Сжать с подсказкой…", "Compact with a hint…"))]]) }
-        if look.fresh { buttons.append(["button": ["id": "ctx:fresh", "label": .string(app.t("Новый разговор с итогом", "New chat with a summary"))]]) }
+        // Short: three side by side in a popover 320 wide.
+        if look.compactNow { buttons.append(["button": ["id": "ctx:compact", "label": .string(app.t("Сжать", "Compact"))]]) }
+        if look.compactHint { buttons.append(["button": ["id": "ctx:hint", "label": .string(app.t("С подсказкой…", "With a hint…"))]]) }
+        if look.fresh { buttons.append(["button": ["id": "ctx:fresh", "label": .string(app.t("Новый с итогом", "New, with a summary"))]]) }
         if !buttons.isEmpty { rows.append(["bar": ["id": "ctx", "items": .array(buttons)]]) }
         return rows
     }
@@ -203,10 +207,10 @@ enum ContextCard {
         for part in facts.parts {
             switch part.id {
             case "messages": add(app.t("Разговор", "Conversation"), part.tokens, "warn")
-            case "skills": add(app.t("Скилы", "Skills"), part.tokens, "info")
-            case "system_prompt": add(app.t("Системные указания", "System prompt"), part.tokens, "idle")
-            case "memory_files": add(app.t("Память (CLAUDE.md)", "Memory (CLAUDE.md)"), part.tokens, "ok")
-            case "autocompact_buffer": add(app.t("Запас на сжатие", "Kept for compaction"), part.tokens, "wait")
+            case "skills": add(app.t("Скилы", "Skills"), part.tokens, "ok")
+            case "system_prompt": add(app.t("Системные указания", "System prompt"), part.tokens, "info")
+            case "memory_files": add(app.t("Память (CLAUDE.md)", "Memory (CLAUDE.md)"), part.tokens, "wait")
+            case "autocompact_buffer": add(app.t("Запас на сжатие", "Kept for compaction"), part.tokens, "idle")
             default: add(app.t("Инструменты, агенты, MCP", "Tools, agents, MCP"), part.tokens, "run")
             }
         }
