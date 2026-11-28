@@ -8,6 +8,11 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.31] — 2026-11-28
+
+- **The peek's text is inside the panel again.** 0.9.30 laid the peek out at
+  the width of the open panel, so its first letters were cut off on the left.
+
 ## [0.9.30] — 2026-11-28
 
 - **The panel opens with shorter stalls.** Every reveal of the whole panel
