@@ -148,24 +148,32 @@ public struct DeckRootView: View {
 
     @ViewBuilder
     private func panel(theme: DeckTheme) -> some View {
-        ZStack(alignment: .top) {
-            // Built once and kept, hidden while the panel is away or peeking,
-            // and laid out at the size it opens at rather than the moving one:
-            // what a reveal costs is the panel's clip, not every card built and
-            // laid out again (`ShellState.workspaceSize`). Hidden from the
-            // pointer and from accessibility, so that nothing reaches what is
-            // not shown.
-            WorkspaceView(shell: shell, model: model, theme: theme)
-                .frame(width: workspaceFrame?.width, height: workspaceFrame?.height, alignment: .top)
-                .opacity(showsWorkspace ? 1 : 0)
-                .allowsHitTesting(showsWorkspace)
-                .accessibilityHidden(!showsWorkspace)
-                .animation(shell.contentAnimation, value: showsWorkspace)
-            if shell.phase == .peek {
-                PeekView(theme: theme, summary: summary, model: model, shell: shell)
-                    .transition(.opacity)
+        // The panel's own size, which each layer is given in turn: overlays,
+        // not a ZStack. A ZStack is as wide as its widest child, and the kept
+        // workspace — the open panel's width — made the peek that wide too, so
+        // its text began off the panel's left edge (the operator, 11-28:
+        // «сьехала надпись»).
+        Color.clear
+            .overlay(alignment: .top) {
+                // Built once and kept, hidden while the panel is away or
+                // peeking, and laid out at the size it opens at rather than the
+                // moving one: what a reveal costs is the panel's clip, not every
+                // card built and laid out again (`ShellState.workspaceSize`).
+                // Hidden from the pointer and from accessibility, so that
+                // nothing reaches what is not shown.
+                WorkspaceView(shell: shell, model: model, theme: theme)
+                    .frame(width: workspaceFrame?.width, height: workspaceFrame?.height, alignment: .top)
+                    .opacity(showsWorkspace ? 1 : 0)
+                    .allowsHitTesting(showsWorkspace)
+                    .accessibilityHidden(!showsWorkspace)
+                    .animation(shell.contentAnimation, value: showsWorkspace)
             }
-        }
+            .overlay(alignment: .top) {
+                if shell.phase == .peek {
+                    PeekView(theme: theme, summary: summary, model: model, shell: shell)
+                        .transition(.opacity)
+                }
+            }
         // The panel reaches above the menu bar so that it stays welded to its
         // island. The content must not: the first line of a card in the
         // menu-bar row would be unreadable against the wallpaper behind it.

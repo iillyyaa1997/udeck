@@ -52,6 +52,7 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
 import json
 import re
 import shlex
@@ -8056,3 +8057,148 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+_KEY = """
+tell application "System Events" to tell process %(process)s
+  set frontmost to true
+  key code KEYCODE USING
+end tell
+return "pressed"
+"""
+
+
+def _key(machine, code, step, using=""):
+    script = ui._applescript(_KEY, process=ui.PROCESS).replace("KEYCODE", str(code)).replace(
+        "USING", (" using {" + using + "}") if using else "")
+    ui.ask(machine, script, step)
+
+
+def _rich(machine, check_dir, lab, width, name):
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin, the stand-in CLI and a project")
+    _write(machine, SETTINGS, {"language": "ru"}, "uDeck in Russian")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake, "name_chats": False}}},
+           "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": width, "height": 11}]}]}, "placing Agents")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=40)
+    machine.click(*new.middle, "＋")
+    machine.sleep(1)
+    option = ui.wait_for(machine, "row.button.new.new:claude", "a new Claude session", ui.PANEL, seconds=8)
+    machine.click(*option.middle, "a new Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "the folder")
+    machine.sleep(4)
+    field = ui.wait_for(machine, "row.input.message", "the field", ui.PANEL, seconds=30)
+    machine.click(*field.middle, "the field")
+    ui.type_text(machine, "[rich] show me", "asking for a rich answer")
+    ui.press_return(machine, "sending it")
+    machine.sleep(5)
+    machine.screenshot(check_dir, f"{name} 1 the answer drawn")
+    found = ui.walk(machine, "the feed", ui.PANEL)
+    links = [w for w in found if w.role == "AXLink"]
+    print(f"{name} links:", [(w.title, w.value, w.description, w.frame) for w in links][:10])
+    print(f"{name} tables:", [w.identifier for w in found if "feed.table" in w.identifier or "feed.code" in w.identifier])
+    target = next((w for w in links if "notes.md" in (w.title + w.value + w.description) and w.frame), None)
+    if target:
+        x, y, w, h = target.frame
+        machine.click(int(x + w / 2), int(y + h / 2), "the notes.md link")
+        machine.sleep(3)
+        print(f"{name} opened:", machine.ssh.run("pgrep -lf 'TextEdit|Xcode|Code' || true", "what opened").stdout.strip())
+        machine.screenshot(check_dir, f"{name} 2 after the link")
+
+
+def check_agents_rich(machine, check_dir, lab):
+    """An answer with a table, code with Copy, a quote, a rule, nested points and a path link, in a wide card."""
+    _rich(machine, check_dir, lab, 8, "rich")
+
+
+def check_agents_richnarrow(machine, check_dir, lab):
+    """The same answer in a narrow card: the table as a list."""
+    _rich(machine, check_dir, lab, 3, "narrow")
+
+SAMPLE_THE_REVEALS = False
+
+
+def check_panel_reveal_timing(machine, check_dir, lab):
+    """The panel revealed by the gesture eight times over a card with a rich feed: what uDeck logs of each.
+
+    Not a verdict — a measurement for two builds side by side (the operator, 11-27:
+    «анимация тормозит … навёл, жду, и потом только он выплывает»). Each reveal logs
+    the time from the gesture to rest and the main thread's longest stall meanwhile.
+    """
+    _rich(machine, check_dir, lab, 8, "reveal")
+    # The rich check ends by opening a file from a link: another application in
+    # front, the panel gone. Back to it.
+    try:
+        ui.wait_for(machine, "row.input.message", "the field still there", ui.PANEL, seconds=4)
+    except NotThere:
+        _open_the_panel(machine, "back to the panel")
+        machine.sleep(2)
+    for extra in ("[rich] again", "[rich] and again"):
+        field = ui.wait_for(machine, "row.input.message", "the field", ui.PANEL, seconds=30)
+        machine.click(*field.middle, "the field")
+        ui.type_text(machine, extra, "another rich answer")
+        ui.press_return(machine, "sending it")
+        machine.sleep(5)
+    machine.screenshot(check_dir, "reveal 0 the feed")
+    _key(machine, 53, "Escape: the panel away")
+    machine.sleep(2)
+    # A peek by the gesture: its text inside the panel (11-28: «сьехала надпись»).
+    for n in range(1, 4):
+        panel.park_in_the_middle(machine)
+        machine.move_pointer(*panel.top_of_the_strip(), f"peek {n}: into the strip")
+        machine.sleep(2.5)
+        if n == 2:
+            machine.screenshot(check_dir, "peek 2 at rest")
+        machine.move_pointer(*panel.middle_of_the_screen(), f"peek {n}: away")
+        machine.sleep(2)
+    # The whole panel, cards and all: the shortcut brings it held. The main
+    # thread sampled all the while, to see what building it costs.
+    if SAMPLE_THE_REVEALS:
+        machine.ssh.run("rm -f /tmp/reveal.sample; (nohup /usr/bin/sample uDeck 44 5 -mayDie -file /tmp/reveal.sample >/dev/null 2>&1 &)",
+                        "sampling uDeck through the reveals")
+    machine.sleep(1)
+    for n in range(1, 9):
+        _open_the_panel(machine, f"whole {n}: the shortcut")
+        machine.sleep(2.5)
+        if n == 4:
+            machine.screenshot(check_dir, "whole 4 at rest")
+        _key(machine, 53, f"whole {n}: Escape")
+        machine.sleep(2)
+    machine.sleep(8 if SAMPLE_THE_REVEALS else 1)
+    sampled = "" if not SAMPLE_THE_REVEALS else machine.ssh.run(
+        "for i in $(seq 1 30); do [ -s /tmp/reveal.sample ] && ! pgrep -x sample >/dev/null && break; sleep 2; done;"
+        " ls -la /tmp/reveal.sample >&2; cat /tmp/reveal.sample",
+        "reading the main thread's samples", seconds=120).stdout
+    (check_dir / "reveal-sample.txt").write_text(sampled)
+    print("reveal sample lines:", len(sampled.splitlines()), "main thread:", "com.apple.main-thread" in sampled)
+    if SAMPLE_THE_REVEALS and not sampled:
+        print("reveal sample: nothing —", machine.ssh.run("ls -la /tmp/reveal.sample /tmp 2>&1 | head -20; which sample", "why no sample").stdout)
+    said = machine.ssh.run(
+        "/usr/bin/log show --last 10m --style compact --predicate "
+        "'process == \"uDeck\" AND (category == \"panel\" OR category == \"gesture\")' | grep -E 'revealed in|fired by' || true",
+        "reading what uDeck logged of the reveals", seconds=120).stdout
+    lines = [line.split("] ", 1)[-1] for line in said.splitlines() if "revealed in" in line or "fired by" in line]
+    for line in lines:
+        print("reveal timing:", line)
+    expect(any("revealed in" in line for line in lines), f"no reveal was logged: {said[-600:]}")
