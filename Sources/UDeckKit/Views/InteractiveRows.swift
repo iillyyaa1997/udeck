@@ -1410,12 +1410,14 @@ struct BarButtonView: View {
     let theme: DeckTheme
     let send: (ResidentEvent) -> Void
     @State private var open = false
+    @State private var hovering = false
 
     var body: some View {
         Button {
             if let options = button.options, !options.isEmpty { open.toggle() } else { send(.press(id: button.id)) }
         } label: { face }
             .buttonStyle(.plain)
+            .onHover { hovering = $0 }
             .help(button.note ?? "")
             .accessibilityIdentifier("row.button.\(button.id)")
             .popover(isPresented: $open, arrowEdge: .bottom) {
@@ -1427,16 +1429,30 @@ struct BarButtonView: View {
             }
     }
 
+    /// A button named in words is drawn as one, a filled shape, so that
+    /// «Сжать» does not read as a plain word beside the text around it (the
+    /// operator's mock-up, 11-28); an icon or a sign — «✕» — stays bare, as
+    /// on a title bar.
+    private var worded: Bool { button.icon == nil && (button.label?.contains(where: \.isLetter) ?? false) }
+
     private var face: some View {
         HStack(spacing: 4) {
             if let icon = button.icon { BarStyle.icon(icon, 12) }
             if let label = button.label { Text(label).lineLimit(1) }
         }
         .font(theme.smallFont)
-        .foregroundStyle(theme.muted)
+        .foregroundStyle(worded ? theme.text : theme.muted)
+        .padding(.horizontal, worded ? 9 : 0)
         .frame(minWidth: 24, minHeight: 24)
-        .background(RoundedRectangle(cornerRadius: 6).fill(open ? theme.subtleFill : Color.clear))
+        .background(RoundedRectangle(cornerRadius: 6).fill(fill))
+        .overlay { if worded { RoundedRectangle(cornerRadius: 6).strokeBorder(theme.line) } }
         .contentShape(Rectangle())
+    }
+
+    private var fill: Color {
+        if open { return worded ? theme.hoverFill(pressed: true) : theme.subtleFill }
+        guard worded else { return .clear }
+        return hovering ? theme.hoverFill(pressed: false) : theme.subtleFill
     }
 }
 
